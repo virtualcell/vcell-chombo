@@ -124,6 +124,19 @@ EB mesh generation, the semi-implicit solve, HDF5 output, zip archiving — but 
 is **not** a numerical regression suite. Nothing here compares against baseline
 values; those baselines live with VCell's own integration tests.
 
+## Licensing
+
+The root `LICENSE` (MIT) covers the code in this repository. It does **not**
+cover `chombo/`, which is vendored third-party source: Chombo is
+Copyright (c) 2000-2012 The Regents of the University of California through
+Lawrence Berkeley National Laboratory, under a BSD-3-Clause-style licence
+reproduced verbatim in [`chombo/Copyright.txt`](chombo/Copyright.txt). That
+licence requires the copyright notice to be retained in both source and binary
+redistributions, so keep that file with the tree and carry it into any packaged
+build.
+
+The two submodules carry their own licences.
+
 ## Provenance
 
 VCellChombo had not been compiled in years. Its `CMakeLists.txt` guarded
