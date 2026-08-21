@@ -1,0 +1,82 @@
+# ctest driver for the end-to-end solver runs.  Invoked via `cmake -P`; see
+# tests/CMakeLists.txt for the arguments.
+#
+# Runs one solver against one .fvinput in a scratch directory and checks that it
+# produced what VCell expects: a .mesh.hdf5, a .log listing one row per saved
+# timepoint, and a .hdf5.zip holding the .sim.hdf5 files those rows name.
+#
+# Expected -D arguments: SOLVER, INPUT, WORK_DIR, BASE_NAME, EXPECTED_TIMEPOINTS
+
+foreach (required SOLVER INPUT WORK_DIR BASE_NAME EXPECTED_TIMEPOINTS)
+	if (NOT DEFINED ${required})
+		message(FATAL_ERROR "RunSolverSmokeTest.cmake: -D${required} is required")
+	endif ()
+endforeach ()
+
+# Start clean: the solver appends to the .log and the .zip, so leftovers from a
+# previous run would make the checks below pass for the wrong reason.
+file(REMOVE_RECURSE "${WORK_DIR}")
+file(MAKE_DIRECTORY "${WORK_DIR}")
+get_filename_component(_input_name "${INPUT}" NAME)
+file(COPY "${INPUT}" DESTINATION "${WORK_DIR}")
+
+execute_process(
+		COMMAND "${SOLVER}" "${_input_name}"
+		WORKING_DIRECTORY "${WORK_DIR}"
+		OUTPUT_VARIABLE solver_output
+		ERROR_VARIABLE solver_output
+		RESULT_VARIABLE solver_result)
+
+if (NOT solver_result EQUAL 0)
+	message(FATAL_ERROR "${SOLVER} exited ${solver_result}:\n${solver_output}")
+endif ()
+
+# The solver catches its own exceptions and can still exit 0 in some paths.
+if (solver_output MATCHES "Exception :")
+	message(FATAL_ERROR "${SOLVER} reported an exception:\n${solver_output}")
+endif ()
+
+if (NOT EXISTS "${WORK_DIR}/${BASE_NAME}.mesh.hdf5")
+	message(FATAL_ERROR "no ${BASE_NAME}.mesh.hdf5 was written:\n${solver_output}")
+endif ()
+
+# Each .log row is "<iteration> <sim file> <zip file> <time>".
+file(STRINGS "${WORK_DIR}/${BASE_NAME}.log" log_lines)
+list(LENGTH log_lines timepoints)
+if (NOT timepoints EQUAL EXPECTED_TIMEPOINTS)
+	message(FATAL_ERROR
+			"expected ${EXPECTED_TIMEPOINTS} timepoints in ${BASE_NAME}.log, got ${timepoints}:\n"
+			"${log_lines}")
+endif ()
+
+set(sim_files "")
+set(zip_files "")
+foreach (line ${log_lines})
+	string(REGEX REPLACE "^ *[0-9]+ +([^ ]+) +([^ ]+) +.*$" "\\1;\\2" fields "${line}")
+	list(GET fields 0 sim_file)
+	list(GET fields 1 zip_file)
+	list(APPEND sim_files "${sim_file}")
+	list(APPEND zip_files "${zip_file}")
+endforeach ()
+list(REMOVE_DUPLICATES zip_files)
+
+# The .sim.hdf5 files are removed from disk once rolled into the archive, so the
+# archive is the only place to look for them.
+foreach (zip_file ${zip_files})
+	if (NOT EXISTS "${WORK_DIR}/${zip_file}")
+		message(FATAL_ERROR "${BASE_NAME}.log names ${zip_file}, which was never written")
+	endif ()
+	file(ARCHIVE_EXTRACT INPUT "${WORK_DIR}/${zip_file}" DESTINATION "${WORK_DIR}/extracted")
+endforeach ()
+
+foreach (sim_file ${sim_files})
+	if (NOT EXISTS "${WORK_DIR}/extracted/${sim_file}")
+		message(FATAL_ERROR "${sim_file} is missing from the zip archive")
+	endif ()
+	file(SIZE "${WORK_DIR}/extracted/${sim_file}" sim_size)
+	if (sim_size EQUAL 0)
+		message(FATAL_ERROR "${sim_file} was written empty")
+	endif ()
+endforeach ()
+
+message(STATUS "${SOLVER}: ${timepoints} timepoints, ${BASE_NAME}.mesh.hdf5 and archive OK")

@@ -47,14 +47,12 @@ JOB_INDEX 0
 JMS_PARAM_END
 */
 void FVSolver::loadJMSInfo(istream& ifsInput, int taskID) {
-	char *broker = new char[256];
-	char *smqusername = new char[256];
-	char *password = new char[256];
-	char *qname = new char[256];
-	char *tname = new char[256];
-	char *vcusername = new char[256];
+	// JMS_USER, JMS_QUEUE and JMS_TOPIC are still parsed so the input file
+	// format is unchanged, but vcell-messaging talks to the broker over the JMS
+	// REST bridge now and derives the destinations itself, so they go unused.
+	string broker, smqusername, password, qname, tname, vcusername;
 	string nextToken, line;
-	int simKey, jobIndex;
+	int simKey = 0, jobIndex = 0;
 
 	while (!ifsInput.eof()) {
 		getline(ifsInput, line);
@@ -70,20 +68,14 @@ void FVSolver::loadJMSInfo(istream& ifsInput, int taskID) {
 		}
 
 		if (nextToken == "JMS_BROKER") {
-			memset(broker, 0, 256 * sizeof(char));
 			lineInput >> broker;
 		} else if (nextToken == "JMS_USER") {
-			memset(smqusername, 0, 256 * sizeof(char));
-			memset(password, 0, 256 * sizeof(char));
 			lineInput >> smqusername >> password;
 		} else if (nextToken == "JMS_QUEUE") {
-			memset(qname, 0, 256 * sizeof(char));
 			lineInput >> qname;
 		} else if (nextToken == "JMS_TOPIC") {
-			memset(tname, 0, 256 * sizeof(char));
 			lineInput >> tname;
 		} else if (nextToken == "VCELL_USER") {
-			memset(vcusername, 0, 256 * sizeof(char));
 			lineInput >> vcusername;
 		} else if (nextToken == "SIMULATION_KEY") {
 			lineInput >> simKey;
@@ -94,12 +86,9 @@ void FVSolver::loadJMSInfo(istream& ifsInput, int taskID) {
 
 #ifdef USE_MESSAGING
 	if (taskID >= 0) {
-		SimulationMessaging::create(broker, smqusername, password, qname, tname, vcusername, simKey, jobIndex, taskID);
-	} else {
-		SimulationMessaging::create();
+		SimulationMessaging::getInstVar()->initialize_curl_messaging(
+				false, broker.c_str(), vcusername.c_str(), simKey, jobIndex, taskID);
 	}
-#else
-	SimulationMessaging::create();
 #endif
 }
 
@@ -1097,9 +1086,6 @@ void FVSolver::createSimTool(istream& ifsInput, int taskID)
 	SimTool::create();
 	simTool = SimTool::getInstance();
 
-	if (taskID < 0) { // no messaging
-		SimulationMessaging::create();
-	}
 	string nextToken, line;
 
 	while (!ifsInput.eof()) {
@@ -1113,16 +1099,15 @@ void FVSolver::createSimTool(istream& ifsInput, int taskID)
 		}
 
 		if (nextToken == "JMS_PARAM_BEGIN") {
+			// MessageEventManager owns the sending thread and starts it with the
+			// singleton, so there is no separate start() step any more.
 			loadJMSInfo(ifsInput, taskID);
-#ifdef USE_MESSAGING
-			SimulationMessaging::getInstVar()->start(); // start the thread
-#endif
 
 #ifdef CH_MPI
 			if (bConsoleOutput || SimTool::getInstance()->isRootRank())
 #endif
 			{
-				SimulationMessaging::getInstVar()->setWorkerEvent(new WorkerEvent(JOB_STARTING, "preprocessing started"));
+				SimulationMessaging::getInstVar()->setWorkerEvent(JobEvent::JOB_STARTING, "preprocessing started");
 			}
 		} else if (nextToken == "SIMULATION_PARAM_BEGIN") {
 			loadSimulationParameters(ifsInput);
@@ -1187,7 +1172,7 @@ void FVSolver::solve(bool convertChomboData)
 	if (bConsoleOutput || SimTool::getInstance()->isRootRank())
 #endif
 	{
-		SimulationMessaging::getInstVar()->setWorkerEvent(new WorkerEvent(JOB_STARTING, "preprocessing finished"));
+		SimulationMessaging::getInstVar()->setWorkerEvent(JobEvent::JOB_STARTING, "preprocessing finished");
 	}
 	simTool->start(convertChomboData);
 }

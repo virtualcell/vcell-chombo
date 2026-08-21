@@ -344,7 +344,7 @@ void SimTool::writeData(double progress, double time, int iteration, bool conver
 		if (bConsoleOutput || isRootRank())
 		{
 #ifndef CH_MPI
-			SimulationMessaging::getInstVar()->setWorkerEvent(new WorkerEvent(JOB_DATA, progress, time));
+			SimulationMessaging::getInstVar()->setWorkerEvent(JobEvent::JOB_DATA, progress, time);
 #endif
 		}
 		simFileCount++;
@@ -448,7 +448,7 @@ void SimTool::start(bool convertChomboData)
 	sprintf(message, "simulation [%s] started", baseSimName.c_str());
 	if (bConsoleOutput || isRootRank())
 	{
-		SimulationMessaging::getInstVar()->setWorkerEvent(new WorkerEvent(JOB_STARTING, message));
+		SimulationMessaging::getInstVar()->setWorkerEvent(JobEvent::JOB_STARTING, message);
 	}
 
 	//
@@ -476,7 +476,7 @@ void SimTool::start(bool convertChomboData)
 			if (bConsoleOutput || isRootRank())
 			{
 #ifndef CH_MPI
-				SimulationMessaging::getInstVar()->setWorkerEvent(new WorkerEvent(JOB_DATA, 0, 0));
+				SimulationMessaging::getInstVar()->setWorkerEvent(JobEvent::JOB_DATA, 0, 0);
 #endif
 			}
 		}
@@ -485,7 +485,7 @@ void SimTool::start(bool convertChomboData)
 		if (bConsoleOutput || isRootRank())
 		{
 #ifndef CH_MPI
-			SimulationMessaging::getInstVar()->setWorkerEvent(new WorkerEvent(JOB_DATA, percentile, simStartTime));
+			SimulationMessaging::getInstVar()->setWorkerEvent(JobEvent::JOB_DATA, percentile, simStartTime);
 #endif
 		}
 	}
@@ -524,7 +524,7 @@ void SimTool::start(bool convertChomboData)
 		if (percentile - lastSentPercentile >= increment) {
 			if (bConsoleOutput || isRootRank())
 			{
-				SimulationMessaging::getInstVar()->setWorkerEvent(new WorkerEvent(JOB_PROGRESS, percentile, simulation->getTime_sec()));
+				SimulationMessaging::getInstVar()->setWorkerEvent(JobEvent::JOB_PROGRESS, percentile, simulation->getTime_sec());
 			}
 			lastSentPercentile = percentile;
 		}
@@ -537,10 +537,10 @@ void SimTool::start(bool convertChomboData)
 	{
 #ifdef CH_MPI
 		copyToPrimaryDataDir();
-		SimulationMessaging::getInstVar()->setWorkerEvent(new WorkerEvent(JOB_DATA, 1.0, simulation->getTime_sec()));
+		SimulationMessaging::getInstVar()->setWorkerEvent(JobEvent::JOB_DATA, 1.0, simulation->getTime_sec());
 #endif
-		SimulationMessaging::getInstVar()->setWorkerEvent(new WorkerEvent(JOB_PROGRESS, 1.0, simulation->getTime_sec()));
-		SimulationMessaging::getInstVar()->setWorkerEvent(new WorkerEvent(JOB_COMPLETED, percentile, simulation->getTime_sec()));
+		SimulationMessaging::getInstVar()->setWorkerEvent(JobEvent::JOB_PROGRESS, 1.0, simulation->getTime_sec());
+		SimulationMessaging::getInstVar()->setWorkerEvent(JobEvent::JOB_COMPLETED, percentile, simulation->getTime_sec());
 	}
 	pout() << "Exit " << thisMethod << endl;
 }

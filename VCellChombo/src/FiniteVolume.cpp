@@ -47,16 +47,21 @@ void vcellExit(int returnCode, string& errorMsg)
 	{
 		if (returnCode != 0)
 		{
-			SimulationMessaging::getInstVar()->setWorkerEvent(new WorkerEvent(JOB_FAILURE, errorMsg.c_str()));
+			SimulationMessaging::getInstVar()->setWorkerEvent(JobEvent::JOB_FAILURE, errorMsg.c_str());
 		}
 #ifdef USE_MESSAGING
-		if (SimTool::getInstance()->isRootRank())
+		// SimTool is only created once FVSolver has parsed the input file, so it
+		// is still null when we fail early (bad arguments, unreadable input).
+		SimTool* simTool = SimTool::getInstance();
+		if (simTool == 0 || simTool->isRootRank())
 		{
 			SimulationMessaging::getInstVar()->waitUntilFinished();
 		}
 #endif
 	}
-	delete SimulationMessaging::getInstVar();
+	// The singleton owns its destructor (it has to join the sending thread), so
+	// it is torn down through cleanupInstanceVar() rather than deleted here.
+	SimulationMessaging::cleanupInstanceVar();
 	delete SimTool::getInstance();
 
 #ifdef CH_MPI

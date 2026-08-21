@@ -55,9 +55,16 @@ endif
 ################################################################
 
 ifeq ($(cxxname),g++)
-  _gppversion := $(subst ., ,$(shell $(CXX) -dumpversion))
+  # Since GCC 7, -dumpversion prints only the major number, which left
+  # _gppminorver empty and made every `test $(_gppminorver) -ge N` below fail
+  # with "unexpected operator".  -dumpfullversion restores the full x.y.z; older
+  # compilers that do not know the option fall through to -dumpversion.
+  _gppversion := $(subst ., ,$(shell $(CXX) -dumpfullversion -dumpversion 2>/dev/null))
   _gppmajorver:= $(word 1,$(_gppversion))
   _gppminorver:= $(word 2,$(_gppversion))
+  ifeq ($(_gppminorver),)
+    _gppminorver:= 0
+  endif
 
   # `-ftemplate-depth' is needed to keep mangled function names from
   #  getting too long for some linkers to handle.

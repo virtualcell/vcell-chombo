@@ -78,10 +78,6 @@ if (OPTION_TARGET_PARALLEL)
 	find_package(MPI REQUIRED)
 endif ()
 
-# Only used to keep chombo/lib/GNUmakefile's sanity check quiet; `make lib`
-# compiles and archives but never links, so these flags go unused.
-set(CHOMBO_HDF5_LINK_FLAGS "-lhdf5 -lz")
-
 #############################################
 #  Chombo
 ##############################################

@@ -60,6 +60,42 @@ function(_chombo_compiler_name out_var compiler_path compiler_id)
 	set(${out_var} "${_name}" PARENT_SCOPE)
 endfunction()
 
+# Chombo takes HDF5 as raw compiler/linker flag strings.  `make lib` only
+# compiles and archives, so the link flags are never actually used -- but
+# lib/mk/check refuses to build unless it can find libhdf5 in the -L paths, so
+# they have to be real.
+function(_chombo_hdf5_flags inc_var lib_var)
+	set(_inc "-DH5_USE_16_API")
+	foreach (dir ${HDF5_INCLUDE_DIRS})
+		string(APPEND _inc " -I${dir}")
+	endforeach ()
+
+	# Conan's HDF5 package exposes only interface targets, so there is no
+	# IMPORTED_LOCATION to read; look next to the include dirs instead, which
+	# works the same way for a system HDF5.
+	set(_hints "")
+	foreach (dir ${HDF5_INCLUDE_DIRS} ${ZLIB_INCLUDE_DIRS})
+		get_filename_component(_root "${dir}" DIRECTORY)
+		list(APPEND _hints "${_root}/lib" "${_root}")
+	endforeach ()
+
+	find_library(CHOMBO_HDF5_C_LIBRARY NAMES hdf5 HINTS ${_hints}
+			DOC "libhdf5 as passed to Chombo's HDFLIBFLAGS")
+	find_library(CHOMBO_ZLIB_LIBRARY NAMES z zlib HINTS ${_hints}
+			DOC "libz as passed to Chombo's HDFLIBFLAGS")
+	if (NOT CHOMBO_HDF5_C_LIBRARY OR NOT CHOMBO_ZLIB_LIBRARY)
+		message(FATAL_ERROR
+				"Could not locate libhdf5/libz next to ${HDF5_INCLUDE_DIRS}. "
+				"Set CHOMBO_HDF5_C_LIBRARY and CHOMBO_ZLIB_LIBRARY explicitly.")
+	endif ()
+
+	get_filename_component(_hdf5_dir "${CHOMBO_HDF5_C_LIBRARY}" DIRECTORY)
+	get_filename_component(_zlib_dir "${CHOMBO_ZLIB_LIBRARY}" DIRECTORY)
+
+	set(${inc_var} "${_inc}" PARENT_SCOPE)
+	set(${lib_var} "-L${_hdf5_dir} -L${_zlib_dir} -lhdf5 -lz" PARENT_SCOPE)
+endfunction()
+
 ##
 # add_chombo_dimension(<dim> [DEPENDS <target>])
 #
@@ -83,13 +119,17 @@ function(add_chombo_dimension DIM)
 	_chombo_compiler_name(_cxx_name "${CMAKE_CXX_COMPILER}" "${CMAKE_CXX_COMPILER_ID}")
 	_chombo_compiler_name(_fc_name "${CMAKE_Fortran_COMPILER}" "${CMAKE_Fortran_COMPILER_ID}")
 
-	# Chombo's `make lib` only compiles and archives, so HDFLIBFLAGS is never
-	# actually used -- but lib/GNUmakefile prints a scary warning when it is
-	# empty, and the include flags very much are needed.
-	set(_hdf_inc_flags "-DH5_USE_16_API")
-	foreach (dir ${HDF5_INCLUDE_DIRS})
-		string(APPEND _hdf_inc_flags " -I${dir}")
-	endforeach ()
+	# The Fortran compiler has to run the C preprocessor over ChomboFortran's
+	# output.  Chombo generates it with `g++ -E -P -C`, keeping comments on
+	# purpose -- stripping them would eat Fortran's `//` string concatenation
+	# operator -- so the C comment blocks that survive (starting with gcc's
+	# implicit stdc-predef.h) are only removed on this second pass.  Chombo splits
+	# $(FC) on whitespace to recover the compiler name, so appending here is safe.
+	if (CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+		set(_fc_name "${_fc_name} -cpp")
+	endif ()
+
+	_chombo_hdf5_flags(_hdf_inc_flags _hdf_lib_flags)
 
 	if (CMAKE_SIZEOF_VOID_P EQUAL 8)
 		set(_use64 TRUE)
@@ -119,8 +159,10 @@ function(add_chombo_dimension DIM)
 			CSHELLCMD=/bin/sh\ -c
 			# --- HDF5 ---
 			HDFINCFLAGS=${_hdf_inc_flags}
-			HDFLIBFLAGS=${CHOMBO_HDF5_LINK_FLAGS}
-			# gfortran needs the C preprocessor run over the ChomboFortran output.
+			HDFLIBFLAGS=${_hdf_lib_flags}
+			# Appended to Chombo's `g++ -E` pass over the .ChF output; this is what
+			# VCell's old Make.defs.local.linux set, kept for parity.  The pass that
+			# actually matters is the -cpp on $(FC) above.
 			fcppflags=-cpp
 			WORKING_DIRECTORY "${CHOMBO_LIB_DIR}"
 			COMMAND ${CMAKE_COMMAND}
