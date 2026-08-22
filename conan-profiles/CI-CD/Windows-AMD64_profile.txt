@@ -42,6 +42,17 @@ tools.cmake.cmaketoolchain:generator=Ninja
 # defect in something we depend on.
 hdf5/*:tools.cmake.cmaketoolchain:extra_variables={'HDF5_ENABLE_NONSTANDARD_FEATURE_FLOAT16': 'OFF'}
 
+# xz_utils refuses to configure here otherwise. Its CMake finds MSYS2's gettext
+# 0.22.5, and native language support needs UCRT with gettext-runtime >= 0.23.1,
+# so it stops with "set XZ_NLS=OFF" -- which is upstream's own sanctioned escape
+# hatch rather than something invented here. NLS only supplies translated error
+# messages in a library we link for its compression, so nothing is lost.
+#
+# xz arrives transitively through libzip. It could be dropped from the graph
+# altogether by turning off libzip's LZMA backend, but that would narrow which
+# archives the solver can read, on every platform, to save a source build on one.
+xz_utils/*:tools.cmake.cmaketoolchain:extra_variables={'XZ_NLS': 'OFF'}
+
 [options]
 fPIC=True
 shared=False
