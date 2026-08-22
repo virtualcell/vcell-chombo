@@ -5,8 +5,10 @@ name: CI
 # conan-profiles/CI-CD/MacOS-ARM64_profile.txt for why Apple Clang is not an
 # option here.
 #
-# Windows is not on the table as things stand: conanfile.py rejects it outright,
-# because Chombo's build system needs GNU make, perl and a Unix shell.
+# Windows builds through MSYS2/MinGW-w64, which supplies the GNU make, perl and
+# shell Chombo's build system needs while still producing native binaries. MSVC
+# is not an option: nothing there reimplements ChomboFortran. Messaging is never
+# built on Windows.
 #
 # Conan Center has no macOS binaries for a GCC profile, so the macOS jobs compile
 # their whole dependency tree from source. That is the cost of needing GCC; see
@@ -14,7 +16,7 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, windows-ci ]
   pull_request:
   workflow_dispatch:
 
@@ -245,5 +247,102 @@ jobs:
           path: |
             build/bin/VCellChombo2D_x64
             build/bin/VCellChombo3D_x64
+          if-no-files-found: error
+          retention-days: 14
+
+  windows:
+    name: Windows x86_64 (MinGW-w64 GCC)
+    runs-on: windows-latest
+    # No Conan Center binaries for a Windows + gcc profile either, so the whole
+    # dependency tree compiles here, as on macOS.
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out repository and submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up MSYS2 with the MinGW-w64 toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          # make and perl come from the MSYS side; everything the build links
+          # against comes from MinGW so the binaries stay native.
+          install: >-
+            make
+            perl
+            diffutils
+          pacboy: >-
+            gcc:p
+            gcc-fortran:p
+            cmake:p
+            ninja:p
+            python:p
+            python-pip:p
+
+      - name: Verify the toolchain matches the Conan profile
+        shell: msys2 {0}
+        run: |
+          expected=$(sed -n 's/^compiler\.version=//p' conan-profiles/CI-CD/Windows-AMD64_profile.txt)
+          for tool in gcc g++ gfortran; do
+            actual=$("$tool" -dumpversion | cut -d. -f1)
+            echo "$tool: $actual  ($(command -v $tool))"
+            if [ "$actual" != "$expected" ]; then
+              echo "::error::$tool is version $actual but Windows-AMD64_profile.txt pins compiler.version=$expected"
+              exit 1
+            fi
+          done
+          # Chombo could not recognise MSYS2 until Make.defs was taught to; an
+          # unrecognised system is not diagnosed there, it silently becomes a Cray.
+          printf 'system := $(filter AIX Linux OSF1 SunOS CYGWIN%% MINGW%% MSYS%% Darwin,$(shell uname))\n' > /tmp/sys.mk
+          printf 'system := $(patsubst MINGW%%,CYGWIN,$(system))\n' >> /tmp/sys.mk
+          printf 'check:\n' >> /tmp/sys.mk
+          printf '\t@test -n "$(system)" || { echo "uname=$(shell uname) is unrecognised by Chombo"; exit 1; }\n' >> /tmp/sys.mk
+          printf '\t@echo "  uname $(shell uname) resolves to Chombo system=$(system)"\n' >> /tmp/sys.mk
+          make -f /tmp/sys.mk check
+          make --version | head -1 | sed 's/^/  /'
+
+      - name: Install Conan
+        shell: msys2 {0}
+        run: |
+          # The MinGW python, so Conan and the compilers it drives agree about
+          # what a path looks like.
+          python -m pip install --quiet --break-system-packages 'conan>=2.0' \
+            || python -m pip install --quiet 'conan>=2.0'
+          conan --version
+
+      - name: Install dependencies with Conan
+        shell: msys2 {0}
+        run: |
+          conan install . --build=missing \
+            -pr:a=conan-profiles/CI-CD/Windows-AMD64_profile.txt
+
+      - name: Configure
+        shell: msys2 {0}
+        run: |
+          # No conanbuild.sh here: cmake and ninja come from MinGW rather than
+          # Conan, so they match the compilers and the path conventions.
+          cmake -B build -S . -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$(pwd)/build/generators/conan_toolchain.cmake" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOPTION_TARGET_MESSAGING=OFF
+
+      - name: Build
+        shell: msys2 {0}
+        run: cmake --build build
+
+      - name: Test
+        shell: msys2 {0}
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Upload solver binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcell-chombo-windows-x86_64
+          path: |
+            build/bin/VCellChombo2D_x64.exe
+            build/bin/VCellChombo3D_x64.exe
           if-no-files-found: error
           retention-days: 14

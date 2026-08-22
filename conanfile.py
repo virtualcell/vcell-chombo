@@ -39,10 +39,12 @@ class VCellChomboRecipe(ConanFile):
     def validate(self):
         # vcell-expressionparser and vcell-messaging both use std::format.
         check_min_cppstd(self, "20")
-        if self.settings.os == "Windows":
+        # Windows builds under MSYS2/MinGW-w64, which provides the GNU make, perl
+        # and shell Chombo's build system needs. MSVC cannot work here.
+        if self.settings.os == "Windows" and self.settings.compiler != "gcc":
             raise ValueError(
-                "vcell-chombo does not build on Windows: Chombo's build system needs "
-                "GNU make, perl and a Unix shell."
+                "On Windows vcell-chombo must be built with MinGW-w64 gcc under MSYS2; "
+                f"compiler={self.settings.compiler} cannot drive Chombo's build system."
             )
 
     def requirements(self):
@@ -53,7 +55,11 @@ class VCellChomboRecipe(ConanFile):
         # SimTool rolls each timestep's .sim.hdf5 into a .hdf5.zip that VCell
         # serves to the client.
         self.requires("libzip/[>=1.10 <2.0]")
-        if self.options.include_messaging:
+        # Messaging is never built on Windows, so libcurl is dropped there outright
+        # rather than left to the option -- which also keeps openssl, its heaviest
+        # transitive dependency, out of a toolchain that has no prebuilt binaries
+        # for any of this.
+        if self.options.include_messaging and self.settings.os != "Windows":
             self.requires("libcurl/[<9.0]")
 
     def build_requirements(self):

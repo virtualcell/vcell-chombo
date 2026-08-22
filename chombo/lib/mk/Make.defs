@@ -72,7 +72,7 @@ mkdep          = $(PERL) $(CHOMBO_HOME)/util/mkdep/mkdep
 ##
 ## $(system) also will be used to set a `CH_' cpp macro in Make.rules.
 ##
-system := $(filter AIX Linux OSF1 SunOS CYGWIN% Darwin HP-UX IRIX IRIX64 FreeBSD NetBSD OpenBSD,$(shell uname))
+system := $(filter AIX Linux OSF1 SunOS CYGWIN% MINGW% MSYS% Darwin HP-UX IRIX IRIX64 FreeBSD NetBSD OpenBSD,$(shell uname))
 unamea := $(shell uname -a)
   arch := $(shell uname -m)
 
@@ -139,6 +139,18 @@ endif
 
 # strip version number from CYGWIN string, if present
 system := $(patsubst CYGWIN%,CYGWIN,$(system))
+
+# MSYS2 reports MINGW64_NT-10.0-... or MSYS_NT-..., neither of which Chombo knew
+# about. An unrecognised system is not diagnosed: it falls through to the "Older
+# Crays" branch below, which quietly sets CXX=CC and ranlib=touch and then fails
+# in ways that have nothing to do with the cause.
+#
+# Folding them onto CYGWIN is the right answer rather than a shortcut. Chombo's
+# CYGWIN handling is empty in practice, and $(system) also selects the CH_ cpp
+# macro, so this yields -DCH_CYGWIN -- which is exactly what VCellChombo's
+# SimTool tests to pick the Windows directory separator.
+system := $(patsubst MINGW%,CYGWIN,$(system))
+system := $(patsubst MSYS%,CYGWIN,$(system))
 #ifeq ($(system),CYGWIN)
   # because of filename case-insensitivity, CYGWIN requires
   # the HDF5 file 'include/hdf5.h' to be copied/renamed/symlinked

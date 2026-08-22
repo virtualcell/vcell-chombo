@@ -1,0 +1,36 @@
+# vcell-chombo builds on Windows through MSYS2/MinGW-w64, not MSVC.
+#
+# Chombo's build system is GNU make plus a perl preprocessor (ChomboFortran)
+# driven through a Unix shell, and there is no reimplementation of that behind
+# MSVC. MinGW-w64 supplies all of it while still producing native Windows
+# binaries with no runtime dependency on an emulation DLL. The historical VCell
+# build used Cygwin for the same reasons, and Chombo's makefiles are folded onto
+# that same CYGWIN branch here -- which is also what yields -DCH_CYGWIN, the
+# macro VCellChombo's SimTool tests to select the Windows path separator.
+#
+# Messaging is never built on Windows, so libcurl and openssl never enter the
+# dependency graph at all; conanfile.py drops the requirement outright rather
+# than leaving it to the option.
+#
+# The version is pinned to what MSYS2 currently ships, which is well ahead of
+# the GCC 13 the Linux and macOS profiles use. That is not a preference: MSYS2
+# offers one GCC, and holding it back would mean pinning packages by hand.
+[settings]
+arch=x86_64
+build_type=Release
+compiler=gcc
+compiler.version=16
+compiler.libcxx=libstdc++11
+compiler.cppstd=20
+compiler.threads=posix
+compiler.exception=seh
+os=Windows
+
+[conf]
+# Required: conanfile.py's layout() only flattens the tree to build/generators
+# when this is set. Without it, cmake_layout() emits build/Release/generators.
+tools.cmake.cmaketoolchain:generator=Ninja
+
+[options]
+fPIC=True
+shared=False

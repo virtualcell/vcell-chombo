@@ -40,9 +40,18 @@ if (CMAKE_SYSTEM_NAME MATCHES "Linux")
 	set(LINUX TRUE)
 endif ()
 
-if (NOT APPLE AND NOT LINUX)
-	message(FATAL_ERROR "Unsupported operating system: ${CMAKE_SYSTEM_NAME}. "
-			"Chombo's build system needs GNU make and a Unix shell; Windows builds went through Cygwin.")
+# Windows is supported through MSYS2/MinGW-w64, which supplies the GNU make,
+# perl and shell Chombo's build system needs while still producing native
+# binaries. A plain MSVC build is not possible: there is no reimplementation of
+# ChomboFortran behind it.
+if (WIN32 AND NOT MINGW)
+	message(FATAL_ERROR
+			"On Windows this must be built under MSYS2/MinGW-w64. Chombo's build system "
+			"needs GNU make, perl and a Unix shell, and MSVC provides none of them.")
+endif ()
+
+if (NOT APPLE AND NOT LINUX AND NOT MINGW)
+	message(FATAL_ERROR "Unsupported operating system: ${CMAKE_SYSTEM_NAME}.")
 endif ()
 
 set(CMAKE_CXX_STANDARD 20)
