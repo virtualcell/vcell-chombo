@@ -14,7 +14,7 @@ name: CI
 
 on:
   push:
-    branches: [ main, macos-messaging ]
+    branches: [ main ]
   pull_request:
   workflow_dispatch:
 
@@ -138,8 +138,9 @@ jobs:
   macos:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-    # Measured green: 10m39s on arm64, 13m58s on x86_64, all dependencies
-    # compiled from source. Ceiling well above that.
+    # Measured green with messaging on: 18m14s on arm64, 18m58s on x86_64. Most
+    # of the difference from Linux is Conan, around 10 minutes, since the whole
+    # dependency tree including openssl and libcurl compiles from source here.
     timeout-minutes: 120
     strategy:
       fail-fast: false
