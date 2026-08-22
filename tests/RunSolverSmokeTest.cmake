@@ -9,8 +9,12 @@
 # final timepoint against a stored baseline. That is the difference between
 # "the pipeline ran" and "the solver still computes what it used to".
 #
+# Given ANALYTIC_EXPECTED instead, it checks the solver's own error against the
+# closed-form solution rather than against its past self.
+#
 # Expected -D arguments: SOLVER, INPUT, WORK_DIR, BASE_NAME, EXPECTED_TIMEPOINTS
 # Optional:              BASELINE, COMPARATOR, RTOL, ATOL
+#                        ANALYTIC_EXPECTED, ANALYTIC_BAND, ANALYTIC_DATASET
 
 foreach (required SOLVER INPUT WORK_DIR BASE_NAME EXPECTED_TIMEPOINTS)
 	if (NOT DEFINED ${required})
@@ -121,5 +125,36 @@ if (DEFINED BASELINE AND DEFINED COMPARATOR)
 				"If the change is intentional, regenerate with:\n"
 				"  ${COMPARATOR} --write ${_final} ${BASELINE}\n"
 				"and say in the commit message why the numbers moved.")
+	endif ()
+endif ()
+
+#############################################
+#  Validation against the analytic solution
+##############################################
+if (DEFINED ANALYTIC_EXPECTED AND DEFINED COMPARATOR)
+	list(GET sim_files -1 _final_sim)
+	set(_final "${WORK_DIR}/extracted/${_final_sim}")
+
+	if (NOT DEFINED ANALYTIC_BAND)
+		set(ANALYTIC_BAND 0.15)
+	endif ()
+	if (NOT DEFINED ANALYTIC_DATASET)
+		set(ANALYTIC_DATASET "solution/U")
+	endif ()
+
+	execute_process(
+			COMMAND "${COMPARATOR}" --analytic "${_final}" "${ANALYTIC_DATASET}"
+					"${ANALYTIC_EXPECTED}" "${ANALYTIC_BAND}"
+			OUTPUT_VARIABLE analytic_output
+			ERROR_VARIABLE analytic_output
+			RESULT_VARIABLE analytic_result)
+	message(STATUS "${analytic_output}")
+
+	if (NOT analytic_result EQUAL 0)
+		message(FATAL_ERROR
+				"${_final_sim} does not agree with the analytic solution.\n"
+				"The expected value is what backward Euler should produce at this time step; "
+				"see tests/README.md for the derivation. A change here means the solver is "
+				"computing something different, not that the number needs updating.")
 	endif ()
 endif ()

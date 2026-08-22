@@ -1,12 +1,18 @@
 // Numerical regression check for the solver's HDF5 output.
 //
-//   compare_solution --check <solution.hdf5> <baseline.txt> [rtol] [atol]
-//   compare_solution --write <solution.hdf5> <baseline.txt>
+//   compare_solution --check    <solution.hdf5> <baseline.txt> [rtol] [atol]
+//   compare_solution --write    <solution.hdf5> <baseline.txt>
+//   compare_solution --analytic <solution.hdf5> <dataset> <expected> [band]
 //
 // Reads every floating-point dataset in the file, in a stable order, and either
 // compares it against a stored baseline or writes that baseline out. The --write
 // mode exists so regenerating a baseline is a documented one-liner rather than
 // folklore; see tests/README.md.
+//
+// --analytic is a different kind of check. Given an EXACT expression the solver
+// computes its own error against it and records "relative L2 error" as an
+// attribute; that mode reads it and compares against what the discrete scheme is
+// predicted to produce. See tests/README.md for the derivation.
 //
 // Why a tool rather than h5diff: the Conan HDF5 package ships no command line
 // utilities, and the project already links the HDF5 C API, so this costs one
@@ -203,10 +209,78 @@ int check(const Fields& actual, const Fields& expected, double rtol, double atol
 	return failures;
 }
 
+// Reads a scalar double attribute off a dataset, e.g. the "relative L2 error"
+// the solver records when an EXACT expression is supplied.
+bool readAttribute(const std::string& path, const std::string& dataset,
+                   const std::string& attribute, double& value)
+{
+	const hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+	if (file < 0)
+	{
+		std::cerr << "cannot open " << path << "\n";
+		return false;
+	}
+	bool ok = false;
+	const hid_t dset = H5Dopen2(file, dataset.c_str(), H5P_DEFAULT);
+	if (dset < 0)
+	{
+		std::cerr << "no dataset " << dataset << " in " << path << "\n";
+	}
+	else
+	{
+		const hid_t attr = H5Aopen(dset, attribute.c_str(), H5P_DEFAULT);
+		if (attr < 0)
+		{
+			std::cerr << "no attribute \"" << attribute << "\" on " << dataset
+			          << " -- the input needs an EXACT expression for the solver to compute it\n";
+		}
+		else
+		{
+			ok = H5Aread(attr, H5T_NATIVE_DOUBLE, &value) >= 0;
+			H5Aclose(attr);
+		}
+		H5Dclose(dset);
+	}
+	H5Fclose(file);
+	return ok;
+}
+
+// Compares the solver's own error against the analytic solution with what the
+// discrete scheme is predicted to produce. A plain upper bound would pass just
+// as happily on a solver that had become more accurate for the wrong reason, or
+// on one whose time integrator had quietly changed order; a band around the
+// prediction does not.
+int checkAnalytic(const std::string& path, const std::string& dataset,
+                  double expected, double band)
+{
+	double measured = 0.0;
+	if (!readAttribute(path, dataset, "relative L2 error", measured)) return 2;
+
+	double maxError = 0.0;
+	const bool haveMax = readAttribute(path, dataset, "max error", maxError);
+
+	const double lo = expected * (1.0 - band), hi = expected * (1.0 + band);
+	std::cout << "  relative L2 error " << std::setprecision(6) << measured
+	          << " against a predicted " << expected
+	          << " (accepting " << lo << " to " << hi << ")\n";
+	if (haveMax) std::cout << "  max error " << maxError << "\n";
+
+	if (measured < lo || measured > hi)
+	{
+		std::cerr << "ANALYTIC " << dataset << ": relative L2 error " << measured
+		          << " is outside " << lo << " to " << hi << ", predicted " << expected
+		          << " (ratio " << measured / expected << ")\n";
+		return 1;
+	}
+	std::cout << "  agrees with the analytic solution to within the discretisation error\n";
+	return 0;
+}
+
 void usage()
 {
-	std::cerr << "usage: compare_solution --check <solution.hdf5> <baseline.txt> [rtol] [atol]\n"
-	          << "       compare_solution --write <solution.hdf5> <baseline.txt>\n";
+	std::cerr << "usage: compare_solution --check    <solution.hdf5> <baseline.txt> [rtol] [atol]\n"
+	          << "       compare_solution --write    <solution.hdf5> <baseline.txt>\n"
+	          << "       compare_solution --analytic <solution.hdf5> <dataset> <expected> [band]\n";
 }
 
 }  // namespace
@@ -219,6 +293,19 @@ int main(int argc, char** argv)
 		return 2;
 	}
 	const std::string mode = argv[1], solution = argv[2], baseline = argv[3];
+
+	if (mode == "--analytic")
+	{
+		if (argc < 5)
+		{
+			usage();
+			return 2;
+		}
+		const double expected = std::stod(argv[4]);
+		const double band = argc > 5 ? std::stod(argv[5]) : 0.15;
+		std::cout << "checking " << solution << " against the analytic solution\n";
+		return checkAnalytic(solution, baseline, expected, band);
+	}
 
 	Fields actual;
 	if (!read(solution, actual)) return 2;

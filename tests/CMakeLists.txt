@@ -1,5 +1,6 @@
-# Three tests per solver: it reports usage when given nothing, it runs a small
-# simulation end to end, and it still computes what it used to.
+# Four tests per solver: it reports usage when given nothing, it runs a small
+# simulation end to end, it still computes what it used to, and what it computes
+# agrees with mathematics.
 #
 # All the inputs are hand-written -- VCell normally generates .fvinput files --
 # around the same geometry: a disc (or sphere) of `cyt` inside a box of `ec`, one
@@ -58,6 +59,33 @@ function(add_solver_tests DIM)
 			-DATOL=${VCELL_CHOMBO_REGRESSION_ATOL}
 			-P ${CMAKE_CURRENT_SOURCE_DIR}/RunSolverSmokeTest.cmake)
 	set_tests_properties(${exe}_regression PROPERTIES TIMEOUT 600)
+
+	# Validation rather than regression: sin(pi x)sin(pi y)[sin(pi z)] decaying as
+	# exp(-N pi^2 t) is an eigenfunction of the diffusion operator with u=0 held on
+	# the boundary, so the solver's own EXACT machinery can be pointed at a closed
+	# form.
+	#
+	# The expected figure is the solver's distance from that closed form, and it
+	# decomposes into terms that were derived rather than observed: backward-Euler
+	# time error 1.95e-04 in 2D and 2.92e-04 in 3D at this time step, plus the
+	# spatial discretisation error of the mesh. tests/README.md carries the
+	# derivation and the refinement studies behind it.
+	if (DIM EQUAL 2)
+		set(_analytic_expected 3.528e-04)
+	else ()
+		set(_analytic_expected 1.386e-03)
+	endif ()
+	add_test(NAME ${exe}_analytic COMMAND ${CMAKE_COMMAND}
+			-DSOLVER=$<TARGET_FILE:${exe}>
+			-DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/resources/analytic${DIM}d.fvinput
+			-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/analytic${DIM}d
+			-DBASE_NAME=SimID_analytic${DIM}d_0_
+			-DEXPECTED_TIMEPOINTS=3
+			-DCOMPARATOR=$<TARGET_FILE:compare_solution>
+			-DANALYTIC_EXPECTED=${_analytic_expected}
+			-DANALYTIC_BAND=${VCELL_CHOMBO_ANALYTIC_BAND}
+			-P ${CMAKE_CURRENT_SOURCE_DIR}/RunSolverSmokeTest.cmake)
+	set_tests_properties(${exe}_analytic PROPERTIES TIMEOUT 600)
 endfunction()
 
 # Tolerances for the regression comparison. Deliberately settable: the same
@@ -67,6 +95,11 @@ endfunction()
 # actually been measured.
 set(VCELL_CHOMBO_REGRESSION_RTOL "1e-9" CACHE STRING "relative tolerance for the solution regression tests")
 set(VCELL_CHOMBO_REGRESSION_ATOL "1e-12" CACHE STRING "absolute tolerance for the solution regression tests")
+
+# How far the measured error may sit from the backward-Euler prediction. It is
+# always a little above it, because the spatial discretisation error adds on top;
+# measured 3% high in 2D and 9% in 3D, the 3D mesh being coarser.
+set(VCELL_CHOMBO_ANALYTIC_BAND "0.15" CACHE STRING "fractional band around the predicted analytic error")
 
 if (OPTION_TARGET_CHOMBO2D_SOLVER)
 	add_solver_tests(2)
