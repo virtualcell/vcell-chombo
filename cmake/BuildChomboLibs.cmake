@@ -41,6 +41,28 @@ set(CHOMBO_BUILD_JOBS "${_chombo_default_jobs}" CACHE STRING "parallelism for th
 
 find_program(CHOMBO_MAKE_PROGRAM NAMES gmake make REQUIRED
 		DOC "GNU make, used to build the vendored Chombo libraries")
+
+# Chombo's makefiles need a modern GNU make. macOS is the trap: /usr/bin/make is
+# GNU make 3.81, frozen in 2006 over the GPLv3 licence change, and under it the
+# `%_F.H: %.ChF` rule never fires. Nothing announces that -- ChomboFortran's
+# generated headers simply never appear, and the build fails much later with
+# "AdvectPhysicsF_F.H: No such file or directory". Homebrew's `make` installs as
+# gmake, which is why gmake is searched for first above.
+execute_process(COMMAND "${CHOMBO_MAKE_PROGRAM}" --version
+		OUTPUT_VARIABLE _make_version_text
+		ERROR_QUIET
+		OUTPUT_STRIP_TRAILING_WHITESPACE)
+if (NOT _make_version_text MATCHES "GNU Make ([0-9]+)\\.([0-9]+)")
+	message(FATAL_ERROR
+			"${CHOMBO_MAKE_PROGRAM} is not GNU make. Chombo's build system requires it.")
+endif ()
+if (CMAKE_MATCH_1 LESS 4)
+	message(FATAL_ERROR
+			"${CHOMBO_MAKE_PROGRAM} is GNU make ${CMAKE_MATCH_1}.${CMAKE_MATCH_2}; Chombo needs 4.0 or newer.\n"
+			"On macOS, /usr/bin/make is 3.81 and will not generate ChomboFortran's headers. "
+			"Install a current one (`brew install make`, which provides `gmake`) and configure again.")
+endif ()
+message(STATUS "Chombo will build with ${CHOMBO_MAKE_PROGRAM} (GNU make ${CMAKE_MATCH_1}.${CMAKE_MATCH_2})")
 find_program(CHOMBO_PERL_PROGRAM NAMES perl REQUIRED
 		DOC "perl, used by Chombo's ChomboFortran preprocessor")
 
