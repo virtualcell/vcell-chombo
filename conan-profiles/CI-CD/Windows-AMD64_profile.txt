@@ -31,6 +31,17 @@ os=Windows
 # when this is set. Without it, cmake_layout() emits build/Release/generators.
 tools.cmake.cmaketoolchain:generator=Ninja
 
+# HDF5 <= 1.14.6 does not compile under this toolchain without this. GCC 16
+# advertises _Float16, so HDF5's ConfigureChecks turns on its FLOAT16 conversion
+# paths, but mingw-w64's <float.h> defines no FLT16_MAX and H5Tconv_float.c
+# fails with "'FLT16_MAX' undeclared". The Conan recipe exposes no option for
+# it, so the CMake variable is injected into that dependency's build directly.
+#
+# Nothing here uses _Float16 -- the solver is entirely double precision -- so
+# this removes a capability we would never call rather than working around a
+# defect in something we depend on.
+hdf5/*:tools.cmake.cmaketoolchain:extra_variables={'HDF5_ENABLE_NONSTANDARD_FEATURE_FLOAT16': 'OFF'}
+
 [options]
 fPIC=True
 shared=False
