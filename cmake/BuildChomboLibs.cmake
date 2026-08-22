@@ -68,6 +68,8 @@ endif ()
 message(STATUS "Chombo will build with ${CHOMBO_MAKE_PROGRAM} (GNU make ${CMAKE_MATCH_1}.${CMAKE_MATCH_2})")
 find_program(CHOMBO_PERL_PROGRAM NAMES perl REQUIRED
 		DOC "perl, used by Chombo's ChomboFortran preprocessor")
+find_program(CHOMBO_BASH_PROGRAM NAMES bash REQUIRED
+		DOC "bash, used to run Chombo's pipelines with pipefail set")
 
 # Chombo picks its compiler flag set by matching the basename of $(CXX)/$(FC)
 # against names it knows (g++, gfortran, icpc, ...).  CMake often hands us the
@@ -179,9 +181,24 @@ function(add_chombo_dimension DIM)
 			CXX=${_cxx_name}
 			FC=${_fc_name}
 			PERL=${CHOMBO_PERL_PROGRAM}
-			# Chombo generates its dependency files through a csh one-liner; sh
-			# runs the same pipeline and is always present.
-			CSHELLCMD=/bin/sh\ -c
+			# Chombo runs its dependency generation and ChomboFortran passes
+			# through this shell. It is written for csh, which is not installed by
+			# default on modern Linux or macOS, and the commands are plain
+			# pipelines that bash runs identically.
+			#
+			# pipefail is the point of using bash rather than sh here. Every one of
+			# those commands has the shape `producer | filter > output`, and a
+			# shell reports only the LAST component's status, so a failed producer
+			# looks like success and leaves a well-formed empty file behind. Three
+			# separate macOS failures hid behind exactly that: mkdep dying into an
+			# empty .d, and cpp failing into an empty .cpre and .f. Chombo half-saw
+			# this coming -- the .d rules delete the output afterwards if it is
+			# empty -- but deleting it does not fail the build either, and the
+			# ChomboFortran rules have no such guard at all.
+			#
+			# pipefail has been in bash since 3.0, so even the 3.2 that macOS still
+			# ships is fine.
+			CSHELLCMD=${CHOMBO_BASH_PROGRAM}\ -o\ pipefail\ -c
 			# The C preprocessor Chombo runs over ChomboFortran's output. Set
 			# explicitly because the Darwin block in lib/mk/Make.defs forces
 			# CH_CPP=/usr/bin/cpp -E, working around g77 not supporting -E; g77 is
