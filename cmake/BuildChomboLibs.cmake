@@ -182,10 +182,20 @@ function(add_chombo_dimension DIM)
 			# --- HDF5 ---
 			HDFINCFLAGS=${_hdf_inc_flags}
 			HDFLIBFLAGS=${_hdf_lib_flags}
-			# Appended to Chombo's `g++ -E` pass over the .ChF output; this is what
-			# VCell's old Make.defs.local.linux set, kept for parity.  The pass that
-			# actually matters is the -cpp on $(FC) above.
-			fcppflags=-cpp
+			# Deliberately NOT setting fcppflags=-cpp here, which VCell's old
+			# Make.defs.local.linux did and which was carried over for parity.
+			# fcppflags is appended to $(CH_CPP), the C preprocessor run over
+			# ChomboFortran's output, where -cpp means nothing -- it is a compiler
+			# flag telling gfortran to preprocess, and the one that matters is the
+			# -cpp appended to $(FC) above. Linux tolerated it because CH_CPP is
+			# `g++ -E -P -C` there and g++ accepts the flag; on macOS the Darwin
+			# block sets CH_CPP to Apple's /usr/bin/cpp, which rejects it outright.
+			#
+			# It failed quietly, too: that step is `$(CH_CPP) ... | awk ... > out`,
+			# and a shell pipeline reports awk's exit status, not cpp's. So the
+			# .cpre came out empty, then the .f, then an object file with no
+			# symbols, and the build only fell over at link with undefined Fortran
+			# references far from the cause.
 			WORKING_DIRECTORY "${CHOMBO_LIB_DIR}"
 			COMMAND ${CMAKE_COMMAND}
 			-DCHOMBO_LIB_DIR=${CHOMBO_LIB_DIR}
