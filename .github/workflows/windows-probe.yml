@@ -1,0 +1,131 @@
+name: Windows probe
+
+# Throwaway reconnaissance for bringing up the Windows build. Delete once
+# Windows CI works.
+#
+# The open questions, in the order they decide the design:
+#
+#  1. What does uname report under MSYS2? Chombo's Make.defs filters uname
+#     against a list containing CYGWIN% but neither MINGW% nor MSYS%, and an
+#     unrecognised system falls through to an "Older Crays" branch that sets
+#     CXX=CC and ranlib=touch. If MINGW is what we get, Chombo needs a patch.
+#  2. Does the MSYS2 toolchain provide everything Chombo's build wants --
+#     gcc, gfortran, GNU make >= 4, perl, and a shell supporting pipefail?
+#  3. Can Conan resolve a Windows + gcc profile, and does anything come
+#     prebuilt? macOS + gcc had nothing, and there is no reason to expect
+#     better here.
+#  4. Do the paths survive? Conan and CMake are Windows-native and think in
+#     C:\..., while Chombo's makefiles run under an MSYS shell thinking in
+#     /c/... That mismatch is the main reason this is being probed rather
+#     than attempted directly.
+#
+# Messaging is deliberately absent throughout: it is never going to be built
+# on Windows, so libcurl and openssl are out of scope here.
+
+on:
+  push:
+    branches: [ windows-ci ]
+  workflow_dispatch:
+
+jobs:
+  probe:
+    name: Probe windows-latest
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MSYS2 with the MinGW-w64 toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            make
+            perl
+            diffutils
+          pacboy: >-
+            gcc:p
+            gcc-fortran:p
+            cmake:p
+            ninja:p
+
+      - name: Question 1 -- what does Chombo's uname filter see?
+        shell: msys2 {0}
+        run: |
+          echo "uname:    $(uname)"
+          echo "uname -m: $(uname -m)"
+          echo "uname -a: $(uname -a)"
+          # Reproduce Make.defs line 75 exactly.
+          printf 'system := $(filter AIX Linux OSF1 SunOS CYGWIN%% Darwin HP-UX IRIX IRIX64 FreeBSD NetBSD OpenBSD,$(shell uname))\n' > /tmp/sys.mk
+          printf 'show:\n\t@echo "  Chombo would resolve system=[$(system)]"\n' >> /tmp/sys.mk
+          make -f /tmp/sys.mk show
+          echo "  (empty means it falls through to the Crays branch: CXX=CC, ranlib=touch)"
+
+      - name: Question 2 -- is the toolchain complete?
+        shell: msys2 {0}
+        run: |
+          for t in gcc g++ gfortran make perl cmake ninja; do
+            p=$(command -v "$t" 2>/dev/null || echo MISSING)
+            printf '  %-9s %s\n' "$t" "$p"
+          done
+          echo "--- versions that matter ---"
+          echo "  gcc:      $(gcc -dumpfullversion 2>/dev/null)"
+          echo "  gfortran: $(gfortran -dumpfullversion 2>/dev/null)"
+          make --version | head -1 | sed 's/^/  make:     /'
+          perl --version | sed -n 2p | sed 's/^/  perl:     /'
+          echo "--- pipefail, which CSHELLCMD relies on ---"
+          bash -o pipefail -c 'false | cat' && echo "  pipefail NOT working" || echo "  pipefail works"
+
+      - name: Question 3 -- what does Conan resolve for Windows + gcc?
+        shell: msys2 {0}
+        run: |
+          python3 -m pip install --quiet --break-system-packages 'conan>=2.0' 2>/dev/null \
+            || python3 -m pip install --quiet 'conan>=2.0' \
+            || { echo "  could not install conan under msys2"; exit 0; }
+          conan --version
+          cat > /tmp/win-gcc.txt <<EOF
+          [settings]
+          arch=x86_64
+          build_type=Release
+          compiler=gcc
+          compiler.version=$(gcc -dumpversion)
+          compiler.libcxx=libstdc++11
+          compiler.cppstd=20
+          os=Windows
+          [conf]
+          tools.cmake.cmaketoolchain:generator=Ninja
+          EOF
+          echo "--- profile under test ---"; cat /tmp/win-gcc.txt
+          conan graph info . -pr:a=/tmp/win-gcc.txt -o include_messaging=False \
+            --format=json > /tmp/graph.json 2>/tmp/graph.err || {
+              echo "  graph info failed:"; tail -25 /tmp/graph.err; }
+          python3 - <<'PY'
+          import json, collections
+          try:
+              g = json.load(open('/tmp/graph.json'))
+          except Exception as e:
+              print('  could not parse graph json:', e); raise SystemExit(0)
+          nodes = g.get('graph', g).get('nodes', {})
+          tally, seen = collections.Counter(), set()
+          for n in nodes.values():
+              ref, binary = n.get('ref'), n.get('binary')
+              if not ref or ref == 'conanfile' or ref in seen: continue
+              seen.add(ref); tally[binary] += 1
+              if binary != 'Skip': print(f'  {str(binary):10s} {ref.split("#")[0]}')
+          print('  --- totals:', dict(tally))
+          PY
+
+      - name: Question 4 -- how do Windows and MSYS paths relate?
+        shell: msys2 {0}
+        run: |
+          echo "  msys pwd:            $(pwd)"
+          echo "  windows form:        $(cygpath -w "$(pwd)" 2>/dev/null || echo 'cygpath MISSING')"
+          echo "  GITHUB_WORKSPACE:    ${GITHUB_WORKSPACE}"
+          echo "  as msys path:        $(cygpath -u "${GITHUB_WORKSPACE}" 2>/dev/null || echo '-')"
+          echo "--- does MinGW cmake accept an msys-style source dir? ---"
+          cmake --version | head -1 | sed 's/^/  /'
+          echo "--- what CMake reports for this system ---"
+          mkdir -p /tmp/cmtest && cd /tmp/cmtest
+          printf 'cmake_minimum_required(VERSION 3.20)\nproject(p LANGUAGES CXX Fortran)\nmessage(STATUS "SYSTEM=${CMAKE_SYSTEM_NAME} WIN32=${WIN32} MINGW=${MINGW} MSYS=${MSYS}")\nmessage(STATUS "CXX=${CMAKE_CXX_COMPILER}")\nmessage(STATUS "FC=${CMAKE_Fortran_COMPILER}")\n' > CMakeLists.txt
+          cmake -G Ninja . 2>&1 | grep -E "SYSTEM=|CXX=|FC=|Error" | head -6 | sed 's/^/  /'
