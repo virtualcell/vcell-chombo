@@ -41,6 +41,31 @@ set(CHOMBO_BUILD_JOBS "${_chombo_default_jobs}" CACHE STRING "parallelism for th
 
 find_program(CHOMBO_MAKE_PROGRAM NAMES gmake make REQUIRED
 		DOC "GNU make, used to build the vendored Chombo libraries")
+
+# Chombo's makefiles want a current GNU make, and its documentation says as
+# much. macOS is the trap: /usr/bin/make is GNU make 3.81, frozen in 2006 over
+# the GPLv3 licence change. Homebrew's `make` installs as gmake, which is why
+# gmake is searched for first above.
+#
+# 3.81 was initially suspected of breaking ChomboFortran's header generation.
+# That turned out to be util/mkdep/mkdep dying on an absent include directory
+# instead, so whether 3.81 would otherwise cope here is untested -- this floor is
+# a deliberate requirement rather than a workaround for a known failure.
+execute_process(COMMAND "${CHOMBO_MAKE_PROGRAM}" --version
+		OUTPUT_VARIABLE _make_version_text
+		ERROR_QUIET
+		OUTPUT_STRIP_TRAILING_WHITESPACE)
+if (NOT _make_version_text MATCHES "GNU Make ([0-9]+)\\.([0-9]+)")
+	message(FATAL_ERROR
+			"${CHOMBO_MAKE_PROGRAM} is not GNU make. Chombo's build system requires it.")
+endif ()
+if (CMAKE_MATCH_1 LESS 4)
+	message(FATAL_ERROR
+			"${CHOMBO_MAKE_PROGRAM} is GNU make ${CMAKE_MATCH_1}.${CMAKE_MATCH_2}; Chombo needs 4.0 or newer.\n"
+			"On macOS, /usr/bin/make is 3.81. "
+			"Install a current one (`brew install make`, which provides `gmake`) and configure again.")
+endif ()
+message(STATUS "Chombo will build with ${CHOMBO_MAKE_PROGRAM} (GNU make ${CMAKE_MATCH_1}.${CMAKE_MATCH_2})")
 find_program(CHOMBO_PERL_PROGRAM NAMES perl REQUIRED
 		DOC "perl, used by Chombo's ChomboFortran preprocessor")
 
@@ -157,13 +182,37 @@ function(add_chombo_dimension DIM)
 			# Chombo generates its dependency files through a csh one-liner; sh
 			# runs the same pipeline and is always present.
 			CSHELLCMD=/bin/sh\ -c
+			# The C preprocessor Chombo runs over ChomboFortran's output. Set
+			# explicitly because the Darwin block in lib/mk/Make.defs forces
+			# CH_CPP=/usr/bin/cpp -E, working around g77 not supporting -E; g77 is
+			# long gone and Apple's cpp is the wrong tool. It preprocesses
+			# traditionally, and against Chombo's indented directives it recognises
+			# an indented #else/#endif while ignoring an indented #ifdef, so the
+			# nesting desynchronises and BaseNamespaceHeader.H fails with "#else
+			# without #if".
+			#
+			# This is what Linux resolves to anyway ($(CXX) -E -P from
+			# Make.defs.defaults, plus -C from Make.defs.GNU), so both platforms now
+			# take the same path. -C is essential and not cosmetic: it keeps
+			# comments, without which the preprocessor eats Fortran's // operator.
+			CH_CPP=${_cxx_name}\ -E\ -P\ -C
 			# --- HDF5 ---
 			HDFINCFLAGS=${_hdf_inc_flags}
 			HDFLIBFLAGS=${_hdf_lib_flags}
-			# Appended to Chombo's `g++ -E` pass over the .ChF output; this is what
-			# VCell's old Make.defs.local.linux set, kept for parity.  The pass that
-			# actually matters is the -cpp on $(FC) above.
-			fcppflags=-cpp
+			# Deliberately NOT setting fcppflags=-cpp here, which VCell's old
+			# Make.defs.local.linux did and which was carried over for parity.
+			# fcppflags is appended to $(CH_CPP), the C preprocessor run over
+			# ChomboFortran's output, where -cpp means nothing -- it is a compiler
+			# flag telling gfortran to preprocess, and the one that matters is the
+			# -cpp appended to $(FC) above. Linux tolerated it because CH_CPP is
+			# `g++ -E -P -C` there and g++ accepts the flag; on macOS the Darwin
+			# block sets CH_CPP to Apple's /usr/bin/cpp, which rejects it outright.
+			#
+			# It failed quietly, too: that step is `$(CH_CPP) ... | awk ... > out`,
+			# and a shell pipeline reports awk's exit status, not cpp's. So the
+			# .cpre came out empty, then the .f, then an object file with no
+			# symbols, and the build only fell over at link with undefined Fortran
+			# references far from the cause.
 			WORKING_DIRECTORY "${CHOMBO_LIB_DIR}"
 			COMMAND ${CMAKE_COMMAND}
 			-DCHOMBO_LIB_DIR=${CHOMBO_LIB_DIR}
