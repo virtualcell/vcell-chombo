@@ -8,13 +8,13 @@ name: CI
 # Windows is not on the table as things stand: conanfile.py rejects it outright,
 # because Chombo's build system needs GNU make, perl and a Unix shell.
 #
-# macOS runs with messaging off. It pulls libcurl and openssl, the two longest
-# source builds, and Conan Center has no macOS binaries for a GCC profile so
-# every dependency compiles here regardless. Turning it on is a follow-up.
+# Conan Center has no macOS binaries for a GCC profile, so the macOS jobs compile
+# their whole dependency tree from source. That is the cost of needing GCC; see
+# the profile header for why Apple Clang is not an option.
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, macos-messaging ]
   pull_request:
   workflow_dispatch:
 
@@ -205,13 +205,11 @@ jobs:
           CXX: g++-13
           FC: gfortran-13
         run: |
-          # Messaging is off for now. It pulls libcurl and openssl, which are the
-          # two longest source builds and the likeliest to break under GCC on
-          # macOS; that is a second step once the base build is proven. Keep this
-          # in sync with OPTION_TARGET_MESSAGING below.
+          # Messaging is on, matching Linux. Conan Center has no macOS binaries
+          # for a GCC profile, so this compiles the whole dependency tree from
+          # source -- libcurl and openssl included, which are the longest of them.
           conan install . --build=missing \
-            -pr:a=conan-profiles/CI-CD/${{ matrix.profile }} \
-            -o include_messaging=False
+            -pr:a=conan-profiles/CI-CD/${{ matrix.profile }}
 
       - name: Configure
         env:
@@ -223,7 +221,7 @@ jobs:
           cmake -B build -S . -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$PWD/build/generators/conan_toolchain.cmake" \
             -DCMAKE_BUILD_TYPE=Release \
-            -DOPTION_TARGET_MESSAGING=OFF
+            -DOPTION_TARGET_MESSAGING=ON
 
       - name: Build
         env:
