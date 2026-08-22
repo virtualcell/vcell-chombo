@@ -1,0 +1,144 @@
+name: macOS probe
+
+# Throwaway reconnaissance for bringing up the macOS build. Reports what the
+# runner actually provides -- Homebrew GCC versions and paths, what Conan Center
+# has prebuilt for the toolchain we need -- so the real profile and job can be
+# written against facts instead of guesses. Delete once macOS CI is working.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    name: Probe ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-15 is arm64; macos-15-intel is x86_64. The sibling solver repos
+        # build for both, so check both here.
+        os: [ macos-15, macos-15-intel ]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Platform
+        run: |
+          sw_vers
+          echo "uname -m: $(uname -m)"
+          echo "brew --prefix: $(brew --prefix)"
+
+      - name: GCC and gfortran available from Homebrew
+        run: |
+          echo "--- already installed ---"
+          brew list --versions | grep -iE '^gcc' || echo "  (no gcc formula installed)"
+          echo "--- what 'brew install gcc' would give ---"
+          brew info --json=v2 gcc | python3 -c "
+          import json,sys
+          d=json.load(sys.stdin)['formulae'][0]
+          print('  stable version:', d['versions']['stable'])
+          "
+          echo "--- gcc/g++/gfortran already on PATH ---"
+          for t in gcc g++ gfortran cpp; do
+            p=$(command -v "$t" || true)
+            echo "  $t -> ${p:-(absent)}"
+          done
+          echo "--- versioned binaries in brew bin ---"
+          ls "$(brew --prefix)/bin" | grep -E '^(gcc|g\+\+|gfortran|cpp)-[0-9]+$' || echo "  (none yet)"
+
+      - name: Install GCC and report the resulting toolchain
+        run: |
+          brew install gcc
+          echo "--- after install ---"
+          ls "$(brew --prefix)/bin" | grep -E '^(gcc|g\+\+|gfortran|cpp)-[0-9]+$' || true
+          # The real question for the Conan profile and for Chombo's compiler
+          # detection: what major version, and under what exact name.
+          for t in "$(brew --prefix)"/bin/g++-* "$(brew --prefix)"/bin/gfortran-*; do
+            [ -x "$t" ] || continue
+            echo "  $t : $($t -dumpfullversion 2>/dev/null || $t -dumpversion)"
+          done
+
+      - name: Confirm Chombo's compiler-name detection resolves correctly
+        run: |
+          # chombo/lib/mk/Make.defs line 49:
+          #   cxxname = $(notdir $(firstword $(subst -, ,$(CXX))))
+          # Homebrew ships g++-14, not g++, so verify that reduces to the name
+          # Chombo matches its GNU rules against. If it does not, Chombo silently
+          # falls back to defaults and loses the -C flag that keeps the Fortran
+          # `//` operator from being eaten as a comment.
+          gxx=$(ls "$(brew --prefix)"/bin/g++-* 2>/dev/null | head -1)
+          gfr=$(ls "$(brew --prefix)"/bin/gfortran-* 2>/dev/null | head -1)
+          # printf rather than a heredoc: recipe lines need real tabs.
+          {
+            printf 'CXX := %s\n' "$gxx"
+            printf 'FC := %s\n' "$gfr"
+            printf 'cxxname = $(notdir $(firstword $(subst -, ,$(CXX))))\n'
+            printf 'fname   = $(notdir $(firstword $(subst -, ,$(FC))))\n'
+            printf 'show:\n'
+            printf '\t@echo "  CXX=$(CXX) -> cxxname=$(cxxname)   Chombo needs: g++"\n'
+            printf '\t@echo "  FC=$(FC) -> fname=$(fname)   Chombo needs: gfortran"\n'
+          } > /tmp/probe.mk
+          make -f /tmp/probe.mk show
+
+      - name: What Conan Center has prebuilt for a GCC-on-macOS profile
+        run: |
+          # This is the crux. Conan Center builds macOS packages with apple-clang.
+          # If a gcc profile finds nothing prebuilt, every dependency compiles
+          # from source on every run, which changes what macOS CI costs.
+          #
+          # All four of our dependencies expose C APIs only (HDF5 is used through
+          # hdf5.h, and hdf5_cpp is deliberately not linked), so mixing an
+          # apple-clang-built dependency with GCC-built code is ABI-safe if that
+          # turns out to be the faster route.
+          # brew, not pip: the runner's Python is externally managed and a plain
+          # `pip install` fails there. This is also what the sibling solver repos
+          # do on macOS.
+          brew install conan
+          conan --version
+          gccver=$(ls "$(brew --prefix)"/bin/g++-* | head -1 | sed 's/.*g++-//')
+          arch=$([ "$(uname -m)" = "arm64" ] && echo armv8 || echo x86_64)
+          cat > /tmp/macos-gcc.txt <<EOF
+          [settings]
+          arch=$arch
+          build_type=Release
+          compiler=gcc
+          compiler.version=$gccver
+          compiler.libcxx=libstdc++11
+          compiler.cppstd=20
+          os=Macos
+          [conf]
+          tools.cmake.cmaketoolchain:generator=Ninja
+          EOF
+          echo "--- profile under test ---"; cat /tmp/macos-gcc.txt
+          # Shared reader for both graphs below. "Download" means Conan Center has
+          # it prebuilt for this profile; "Build" or "Missing" means it compiles
+          # from source here, which is the thing worth knowing.
+          cat > /tmp/binstat.py <<'PY'
+          import json, sys, collections
+          try:
+              g = json.load(open(sys.argv[1]))
+          except Exception as e:
+              print('  could not parse graph json:', e); raise SystemExit(0)
+          nodes = g.get('graph', g).get('nodes', {})
+          tally, seen = collections.Counter(), set()
+          for n in nodes.values():
+              ref, binary = n.get('ref'), n.get('binary')
+              if not ref or ref == 'conanfile' or ref in seen: continue
+              seen.add(ref)
+              tally[binary] += 1
+              if binary != 'Skip':            # Skip = build tool not needed here
+                  print(f'  {str(binary):10s} {ref.split("#")[0]}')
+          print('  --- totals:', dict(tally))
+          PY
+          echo "--- per-package binary status ---"
+          conan graph info . -pr:a=/tmp/macos-gcc.txt --format=json > /tmp/graph-gcc.json 2>/tmp/graph-gcc.err || {
+            echo "graph info failed:"; tail -20 /tmp/graph-gcc.err; }
+          python3 /tmp/binstat.py /tmp/graph-gcc.json
+
+      - name: Same question for the messaging-off dependency set
+        run: |
+          # Messaging pulls libcurl and openssl, the two heaviest things to build
+          # from source. Worth knowing the cost of a first macOS build without it.
+          conan graph info . -pr:a=/tmp/macos-gcc.txt -o include_messaging=False \
+            --format=json > /tmp/graph-nomsg.json 2>/dev/null || echo "  (graph info failed)"
+          python3 /tmp/binstat.py /tmp/graph-nomsg.json
