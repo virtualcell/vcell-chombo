@@ -6,6 +6,11 @@ name: macOS probe
 # written against facts instead of guesses. Delete once macOS CI is working.
 
 on:
+  # Runs on pushes to its own branch. workflow_dispatch would be tidier, but
+  # GitHub only exposes that for workflows already on the default branch, and
+  # this one is deliberately not going near main.
+  push:
+    branches: [ macos-ci ]
   workflow_dispatch:
 
 jobs:
