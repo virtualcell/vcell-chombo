@@ -179,6 +179,20 @@ function(add_chombo_dimension DIM)
 			# Chombo generates its dependency files through a csh one-liner; sh
 			# runs the same pipeline and is always present.
 			CSHELLCMD=/bin/sh\ -c
+			# The C preprocessor Chombo runs over ChomboFortran's output. Set
+			# explicitly because the Darwin block in lib/mk/Make.defs forces
+			# CH_CPP=/usr/bin/cpp -E, working around g77 not supporting -E; g77 is
+			# long gone and Apple's cpp is the wrong tool. It preprocesses
+			# traditionally, and against Chombo's indented directives it recognises
+			# an indented #else/#endif while ignoring an indented #ifdef, so the
+			# nesting desynchronises and BaseNamespaceHeader.H fails with "#else
+			# without #if".
+			#
+			# This is what Linux resolves to anyway ($(CXX) -E -P from
+			# Make.defs.defaults, plus -C from Make.defs.GNU), so both platforms now
+			# take the same path. -C is essential and not cosmetic: it keeps
+			# comments, without which the preprocessor eats Fortran's // operator.
+			CH_CPP=${_cxx_name}\ -E\ -P\ -C
 			# --- HDF5 ---
 			HDFINCFLAGS=${_hdf_inc_flags}
 			HDFLIBFLAGS=${_hdf_lib_flags}
