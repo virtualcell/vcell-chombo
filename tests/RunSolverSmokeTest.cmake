@@ -5,7 +5,12 @@
 # produced what VCell expects: a .mesh.hdf5, a .log listing one row per saved
 # timepoint, and a .hdf5.zip holding the .sim.hdf5 files those rows name.
 #
+# Given BASELINE and COMPARATOR as well, it goes on to compare the values in the
+# final timepoint against a stored baseline. That is the difference between
+# "the pipeline ran" and "the solver still computes what it used to".
+#
 # Expected -D arguments: SOLVER, INPUT, WORK_DIR, BASE_NAME, EXPECTED_TIMEPOINTS
+# Optional:              BASELINE, COMPARATOR, RTOL, ATOL
 
 foreach (required SOLVER INPUT WORK_DIR BASE_NAME EXPECTED_TIMEPOINTS)
 	if (NOT DEFINED ${required})
@@ -80,3 +85,41 @@ foreach (sim_file ${sim_files})
 endforeach ()
 
 message(STATUS "${SOLVER}: ${timepoints} timepoints, ${BASE_NAME}.mesh.hdf5 and archive OK")
+
+#############################################
+#  Numerical regression, when a baseline is supplied
+##############################################
+if (DEFINED BASELINE AND DEFINED COMPARATOR)
+	if (NOT EXISTS "${BASELINE}")
+		message(FATAL_ERROR
+				"baseline ${BASELINE} does not exist.\n"
+				"Generate it with: ${COMPARATOR} --write <solution.hdf5> ${BASELINE}")
+	endif ()
+
+	# The last row of the .log names the final timepoint, which is the most
+	# sensitive to a numerical change because error accumulates into it.
+	list(GET sim_files -1 _final_sim)
+	set(_final "${WORK_DIR}/extracted/${_final_sim}")
+
+	if (NOT DEFINED RTOL)
+		set(RTOL 1e-9)
+	endif ()
+	if (NOT DEFINED ATOL)
+		set(ATOL 1e-12)
+	endif ()
+
+	execute_process(
+			COMMAND "${COMPARATOR}" --check "${_final}" "${BASELINE}" "${RTOL}" "${ATOL}"
+			OUTPUT_VARIABLE compare_output
+			ERROR_VARIABLE compare_output
+			RESULT_VARIABLE compare_result)
+	message(STATUS "${compare_output}")
+
+	if (NOT compare_result EQUAL 0)
+		message(FATAL_ERROR
+				"${_final_sim} does not match ${BASELINE}.\n"
+				"If the change is intentional, regenerate with:\n"
+				"  ${COMPARATOR} --write ${_final} ${BASELINE}\n"
+				"and say in the commit message why the numbers moved.")
+	endif ()
+endif ()
