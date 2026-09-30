@@ -45,6 +45,14 @@ using std::endl;
 
 #define ZIP_FILE_LIMIT 1E9
 
+// Buffers that hold a path built from BASE_FILE_NAME. They were 128 bytes, and
+// VCell passes an absolute path (a user's simdata directory on the desktop,
+// /simdata/<user>/ on the cluster), so a long directory silently overran the
+// stack and the follow-up open failed on a truncated name. PATH_MAX-sized now;
+// the error-message buffers leave room for a path plus the message text.
+#define FILE_NAME_BUFSIZE 4096
+#define FILE_ERRMSG_BUFSIZE (FILE_NAME_BUFSIZE + 512)
+
 #define SIM_FILE_EXT ".sim"
 #define SIM_HDF5_FILE_EXT ".sim.hdf5"
 #define MESH_HDF5_FILE_EXT ".mesh.hdf5"
@@ -235,7 +243,7 @@ FILE* SimTool::lockForReadWrite()
 		return 0;
 	}
 
-	char tidFileName[128];
+	char tidFileName[FILE_NAME_BUFSIZE];
 	sprintf(tidFileName,"%s%s", baseFileName.c_str(), TID_FILE_EXT);
 
 	bool bExist = false;
@@ -248,9 +256,10 @@ FILE* SimTool::lockForReadWrite()
 	FILE* fp = openFileWithRetry(tidFileName, bExist ? "r+" : "w+");
 
 	if (fp == 0){
-		char errmsg[512];
+		char errmsg[FILE_ERRMSG_BUFSIZE];
 		sprintf(errmsg, "%s - error opening .tid file <%s>", thisMethod, tidFileName);
-		throw errmsg;
+		// A copy: errmsg is a stack buffer, gone by the time main() catches this.
+		throw std::string(errmsg);
 	}
 	if (bExist) {
 		int taskIDInFile = 0;
@@ -280,8 +289,8 @@ void SimTool::writeData(double progress, double time, int iteration, bool conver
 
 #ifndef CH_MPI
 	FILE *logFP;
-	char logFileName[128];
-	char zipHdf5FileName[128];
+	char logFileName[FILE_NAME_BUFSIZE];
+	char zipHdf5FileName[FILE_NAME_BUFSIZE];
 
 	FILE* tidFP = NULL;
 	if (isRootRank())
@@ -291,11 +300,17 @@ void SimTool::writeData(double progress, double time, int iteration, bool conver
 #endif
 	
 	bool bSuccess = true;
-	char errmsg[512];
-	char hdf5SimFileName[128];
+	char errmsg[FILE_ERRMSG_BUFSIZE];
+	// The .log and the zip entry name the .sim.hdf5 without a directory, but
+	// the scratch copy is written next to the other results, not into the
+	// current directory: that may not be writable (a read-only container, a
+	// desktop launched from anywhere), and the results directory must be.
+	char hdf5SimFileName[FILE_NAME_BUFSIZE];
 	sprintf(hdf5SimFileName,"%s%.4d%s",baseSimName.c_str(), simFileCount, SIM_HDF5_FILE_EXT);
+	char hdf5SimFilePath[FILE_NAME_BUFSIZE];
+	sprintf(hdf5SimFilePath,"%s%s",baseDirName.c_str(), hdf5SimFileName);
 	// write VCell and/or Chombo output
-	simulation->getScheduler()->writeData(hdf5SimFileName, convertChomboData);
+	simulation->getScheduler()->writeData(hdf5SimFilePath, convertChomboData);
 
 #ifndef CH_MPI
 	if (chomboSpec->isSaveVCellOutput())
@@ -308,12 +323,12 @@ void SimTool::writeData(double progress, double time, int iteration, bool conver
 			bSuccess = false;
 		} else {
 			sprintf(zipHdf5FileName,"%s%.2d%s",baseFileName.c_str(), zipFileCount, ZIP_HDF5_FILE_EXT);
-			bSuccess = zipUnzipWithRetry(true, zipHdf5FileName, hdf5SimFileName, errmsg);
-			remove(hdf5SimFileName);
+			bSuccess = zipUnzipWithRetry(true, zipHdf5FileName, hdf5SimFilePath, errmsg);
+			remove(hdf5SimFilePath);
 
 			// write the log file
 			if (bSuccess) {					
-				char zipFileNameWithoutPath[512];
+				char zipFileNameWithoutPath[FILE_NAME_BUFSIZE];
 				sprintf(zipFileNameWithoutPath,"%s%.2d%s",baseSimName.c_str(), zipFileCount, ZIP_HDF5_FILE_EXT);
 				fprintf(logFP,"%4d %s %s %.15lg\n", iteration, hdf5SimFileName, zipFileNameWithoutPath, time);
 
@@ -349,7 +364,8 @@ void SimTool::writeData(double progress, double time, int iteration, bool conver
 		}
 		simFileCount++;
 	} else {
-		throw errmsg;
+		// A copy: errmsg is a stack buffer, gone by the time main() catches this.
+		throw std::string(errmsg);
 	}
 	pout() << "Exit " << methodName << endl;
 }
@@ -365,7 +381,7 @@ void SimTool::cleanupLastRun(bool convertChomboData)
 
 	if (isRootRank())
 	{
-		char buffer[256];
+		char buffer[FILE_NAME_BUFSIZE];
 		if (!convertChomboData)
 		{
 			sprintf(buffer,"%s%s",baseFileName.c_str(), MESH_HDF5_FILE_EXT);
@@ -411,7 +427,7 @@ void SimTool::start(bool convertChomboData)
 #ifndef CH_MPI
 	if (simulation->getPostProcessingBlock() != NULL)
 	{
-		char h5PPFileName[128];
+		char h5PPFileName[FILE_NAME_BUFSIZE];
 		sprintf(h5PPFileName, "%s%s", baseFileName.c_str(), PP_HDF5_FILE_EXT);
 		postProcessingHdf5Writer = new PostProcessingHdf5Writer(h5PPFileName, simulation->getPostProcessingBlock());
 	}
