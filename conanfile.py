@@ -25,6 +25,12 @@ class VCellChomboRecipe(ConanFile):
         "with_2d": True,
         "with_3d": True,
         "parallel": False,
+        # vcell-messaging only ever speaks plain http:// to the broker's REST
+        # bridge (vcell-messaging/src/CurlProxyClasses.cpp), so libcurl needs
+        # no TLS. Leaving it out drops OpenSSL from the dependency tree -- the
+        # longest build on macOS, where everything compiles from source -- and
+        # leaves the release binaries with no CA-bundle path to get wrong.
+        "libcurl/*:with_ssl": False,
     }
 
     def layout(self):
