@@ -56,6 +56,8 @@
 #define HDF5_FILE_EXT ".hdf5"
 #define MESH_HDF5_FILE_EXT ".mesh.hdf5"
 #define IF_VAR_NAME_PREFIX "zzz_IF_"
+// Holds a path built from BASE_FILE_NAME -- see FILE_NAME_BUFSIZE in SimTool.cpp.
+#define FILE_NAME_BUFSIZE 4096
 #define CHOMBO_OUTPUT_FILE_NAME_FORMAT "%s%06d_%s_vol%d"HDF5_FILE_EXT  // SimID_98312620_0_000000_outside_vol0.hdf5
 
 static const int nestingRadius  = 2; //ghostPhi[0];  // should be the same as ghost phi size, but Terry used 2
@@ -1603,7 +1605,7 @@ void ChomboScheduler::writeData(char* filename, bool convertChomboData) {
 					pout() << methodName << " feature not found or no variables defined in feature " << (feature == NULL ? "" : feature->getName()) << endl;
 					continue;
 				}
-				char hdf5FileName[128];
+				char hdf5FileName[FILE_NAME_BUFSIZE];
 				sprintf(hdf5FileName, CHOMBO_OUTPUT_FILE_NAME_FORMAT, SimTool::getInstance()->getBaseFileName(), simulation->getCurrIteration(), feature->getName().c_str(), ivol);
 				pout() << methodName << " writeEBHDF5, [iphase, ivol]=[" << iphase << "," << ivol << "] to " << hdf5FileName << endl;
 
@@ -2768,7 +2770,7 @@ void ChomboScheduler::writeMeshHdf5(MembraneElementMetrics* metricsData, int ver
 	H5Pset_fapl_mpio(file_access,  MPI_COMM_WORLD, MPI_INFO_NULL);
 #endif
 
-	char fileName[128];
+	char fileName[FILE_NAME_BUFSIZE];
 	sprintf(fileName, "%s%s", SimTool::getInstance()->getBaseFileName(), MESH_HDF5_FILE_EXT);
 	pout() << "creating file " << fileName << endl;
 	hid_t h5MeshFile = H5Fcreate(fileName, H5F_ACC_TRUNC, H5P_DEFAULT, file_access);
@@ -3559,7 +3561,7 @@ void ChomboScheduler::updateSolutionFromChomboOutputFile()
 				firstFileVol = ivol;
 			}
 			
-			char hdf5FileName[128];
+			char hdf5FileName[FILE_NAME_BUFSIZE];
 			sprintf(hdf5FileName, CHOMBO_OUTPUT_FILE_NAME_FORMAT, SimTool::getInstance()->getBaseFileName(), simulation->getCurrIteration(), feature->getName().c_str(), ivol);
 			pout() << METHOD << " readEBHDF5, [iphase, ivol]=[" << iphase << "," << ivol << "] from " << hdf5FileName << endl;
 
@@ -3633,7 +3635,7 @@ void ChomboScheduler::updateSolutionFromChomboOutputFile()
 	if (firstFilePhase != -1)
 	{
 		Feature* feature = phaseVolumeList[firstFilePhase][firstFileVol]->feature;
-		char hdf5FileName[128];
+		char hdf5FileName[FILE_NAME_BUFSIZE];
 		// write membrane variable solution and extrapolated values to the first hdf5 file
 		sprintf(hdf5FileName, CHOMBO_OUTPUT_FILE_NAME_FORMAT, SimTool::getInstance()->getBaseFileName(), simulation->getCurrIteration(), feature->getName().c_str(), firstFileVol);
 		hid_t h5SimFile =  H5Fopen(hdf5FileName, H5F_ACC_RDONLY, H5P_DEFAULT);
