@@ -12,13 +12,16 @@
 #     zero flux on the outer box, no reaction terms
 #
 # Nothing enters or leaves the box, so total(U) + total(V) must stay at its
-# initial value while roughly half the mass moves across the membrane. The
+# initial value while mass moves across the membrane. The
 # empty POST_PROCESSING_BLOCK turns on the solver's variable statistics
 # (mean/total/min/max per variable per saved time, in <base>.hdf5), which is
 # where tests/release/check_release.py reads the totals from.
 #
 # Signs follow VCell's jump-condition convention: FLUX <feature> is the flux
-# leaving that feature through the membrane, so the two sides carry J and -J.
+# INTO that feature through the membrane (positive = influx), so cyt carries
+# -J and ec carries +J. (Written the other way round, the exchange runs
+# uphill and blows up -- conserving the total all the while, which is why the
+# check also requires V to end up positive and non-trivial.)
 SIMULATION_PARAM_BEGIN
 SOLVER CHOMBO_SEMIIMPLICIT_SOLVER
 BASE_FILE_NAME SimID_reference2d_0_
@@ -93,10 +96,10 @@ COMPARTMENT_END
 MEMBRANE_BEGIN cyt_ec_membrane cyt ec
 BOUNDARY_CONDITIONS flux flux flux flux
 JUMP_CONDITION_BEGIN U
-FLUX cyt (1.0 * (U_cyt_membrane - V_ec_membrane));
+FLUX cyt  - (1.0 * (U_cyt_membrane - V_ec_membrane));
 JUMP_CONDITION_END
 JUMP_CONDITION_BEGIN V
-FLUX ec  - (1.0 * (U_cyt_membrane - V_ec_membrane));
+FLUX ec (1.0 * (U_cyt_membrane - V_ec_membrane));
 JUMP_CONDITION_END
 MEMBRANE_END
 
