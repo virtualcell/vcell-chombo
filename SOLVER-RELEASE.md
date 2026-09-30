@@ -132,4 +132,53 @@ and in 3D:
 | analytic | the error against the closed-form solution is the one the scheme predicts, to within 15% (`tests/README.md`) |
 | reference | two species exchange across the embedded-boundary membrane (`tests/resources/reference<N>d.fvinput`). The summed total stays constant while mass crosses. |
 
-RESULTS_PLACEHOLDER
+The Linux `check_release.py` run is made by a separate unprivileged user from
+the root-owned checkout, so its current directory is not writable. That is the
+condition under which the old scratch-file location failed.
+
+### Reference models
+
+The reference models are the first inputs in this repository that push mass
+through the embedded boundary. U starts as a Gaussian bump on 1.0 inside a
+disc (2D) or sphere (3D) of radius 0.25. V starts at 0 in the rest of the unit
+box. They exchange through the membrane flux `k (U - V)`, with zero flux on
+the box. First release-candidate results:
+
+| model | Σ total, t = 0 → 0.2 | max drift | mass crossed | equilibrium share of ec |
+|---|---|---|---|---|
+| 2D (32², disc) | 136.5660017 → 136.5660017 | 7.5e-10 | 64.2% | 80.4% |
+| 3D (16³, sphere) | 41.50830499 → 41.50830495 | 1.5e-9 | 83.5% | 93.5% |
+
+The mass that has crossed is heading toward ec's share of the volume, which is
+where U = V would put it. The totals are conserved to the linear-solver
+tolerance.
+
+On every platform checked so far (Linux x86_64 and aarch64, macOS arm64 from
+the universal archive), the regression cases match the Linux/GCC 13 baselines
+to rtol 1e-9, with a worst relative difference of about 1.7e-15. The analytic
+cases reproduce the predicted errors (3.528e-4 in 2D, 1.386e-3 in 3D) with a
+ratio of 1.000.
+
+A note on signs, because this cost one CI round: in a `JUMP_CONDITION`,
+`FLUX <feature> expr` is the flux **into** that feature, as in VCell's
+math, where positive is an influx. With the signs the wrong way round the
+model pumped mass uphill without bound, yet still conserved the total to 8e-9.
+That is why the check also requires the transferred mass to be positive and
+substantial.
+
+## For VCell
+
+- **Local executables (B2).** Take `linux64.tgz`, `mac64.tgz` and
+  `SHA256SUMS` from the release and unpack them flat into
+  `localsolvers/{linux64,mac64}/`. The names are the ones
+  `SolverDescription.Chombo` already resolves (`VCellChombo2D_x64`,
+  `VCellChombo3D_x64`). There is no `win64` asset, so Chombo stays unavailable
+  on Windows. For notarization, the mac Mach-O files are the two executables
+  plus `libgfortran.5.dylib`, `libquadmath.0.dylib`, `libstdc++.6.dylib` and
+  `libgcc_s.1.1.dylib`. The effective minimum macOS is 15.
+- **HPC (C2).** `VCELL_HTC_VCELLCHOMBO_APPTAINER_IMAGE=oras://ghcr.io/virtualcell/vcell-chombo_singularity:<X.Y.Z>`
+  and `VCELL_HTC_VCELLCHOMBO_SOLVER_LIST=Chombo`, which is
+  `SolverDescription.Chombo`'s name. SlurmProxy's existing command line (bare
+  executable name, `/simdata` paths, `-tid <n>`) works unchanged. Serial only:
+  a Chombo simulation marked parallel asks for `VCellChombo<N>D_x64parallel`,
+  which this image does not provide.

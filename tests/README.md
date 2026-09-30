@@ -145,3 +145,13 @@ The embedded-boundary machinery, which is the reason this solver exists, is
 still only covered by regression against its own output. A closed form on a disc
 with a zero-flux boundary exists — Bessel eigenfunctions — but the expression
 parser has no Bessel functions, so it would need a different approach.
+
+## Release checks
+
+`tests/release/check_release.py` runs the same inputs, plus
+`reference{2,3}d.fvinput`, against what actually ships: an unpacked release
+archive, the image, or the SIF. It needs only numpy and h5py on the host, and
+it runs every case with `-tid 0` against a fake broker. The reference models
+exchange mass between two species across the embedded-boundary membrane. They
+check that the summed total is conserved while a substantial fraction of the
+mass crosses. [SOLVER-RELEASE.md](../SOLVER-RELEASE.md) records the numbers.
