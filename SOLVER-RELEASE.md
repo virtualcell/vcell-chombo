@@ -23,6 +23,8 @@ Tag `main` with `vX.Y.Z`. The workflow attaches:
 | `mac64.tgz` | universal binaries (arm64 + x86_64), built with Homebrew GCC 13 and merged with `lipo`, ad-hoc signed |
 | `SHA256SUMS` | a checksum for each of the three archives |
 
+The SIF is about 42 MB.
+
 There is **no `win64.zip`**. Chombo's build system needs GNU make, perl and a
 Unix shell, so `conanfile.py` rejects Windows. The MinGW-w64 port on the
 `windows-ci` branch gets as far as Chombo's `AMRTools` and then stops on an
@@ -153,9 +155,10 @@ The mass that has crossed is heading toward ec's share of the volume, which is
 where U = V would put it. The totals are conserved to the linear-solver
 tolerance.
 
-On every platform checked so far (Linux x86_64 and aarch64, macOS arm64 from
-the universal archive), the regression cases match the Linux/GCC 13 baselines
-to rtol 1e-9, with a worst relative difference of about 1.7e-15. The analytic
+The same numbers come out of every target: the Linux x86_64 and aarch64
+archives, the amd64 and arm64 images, the amd64 SIF under `--containall`, and
+the universal mac archive on arm64. On all of them the regression cases match
+the Linux/GCC 13 baselines to rtol 1e-9, with a worst relative difference of about 1.7e-15. The analytic
 cases reproduce the predicted errors (3.528e-4 in 2D, 1.386e-3 in 3D) with a
 ratio of 1.000.
 
