@@ -301,10 +301,16 @@ void SimTool::writeData(double progress, double time, int iteration, bool conver
 	
 	bool bSuccess = true;
 	char errmsg[FILE_ERRMSG_BUFSIZE];
+	// The .log and the zip entry name the .sim.hdf5 without a directory, but
+	// the scratch copy is written next to the other results, not into the
+	// current directory: that may not be writable (a read-only container, a
+	// desktop launched from anywhere), and the results directory must be.
 	char hdf5SimFileName[FILE_NAME_BUFSIZE];
 	sprintf(hdf5SimFileName,"%s%.4d%s",baseSimName.c_str(), simFileCount, SIM_HDF5_FILE_EXT);
+	char hdf5SimFilePath[FILE_NAME_BUFSIZE];
+	sprintf(hdf5SimFilePath,"%s%s",baseDirName.c_str(), hdf5SimFileName);
 	// write VCell and/or Chombo output
-	simulation->getScheduler()->writeData(hdf5SimFileName, convertChomboData);
+	simulation->getScheduler()->writeData(hdf5SimFilePath, convertChomboData);
 
 #ifndef CH_MPI
 	if (chomboSpec->isSaveVCellOutput())
@@ -317,8 +323,8 @@ void SimTool::writeData(double progress, double time, int iteration, bool conver
 			bSuccess = false;
 		} else {
 			sprintf(zipHdf5FileName,"%s%.2d%s",baseFileName.c_str(), zipFileCount, ZIP_HDF5_FILE_EXT);
-			bSuccess = zipUnzipWithRetry(true, zipHdf5FileName, hdf5SimFileName, errmsg);
-			remove(hdf5SimFileName);
+			bSuccess = zipUnzipWithRetry(true, zipHdf5FileName, hdf5SimFilePath, errmsg);
+			remove(hdf5SimFilePath);
 
 			// write the log file
 			if (bSuccess) {					

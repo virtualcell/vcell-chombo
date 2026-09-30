@@ -94,13 +94,13 @@ There are no test binaries and no static libraries.
 | `VCellChombo2D_x64 ...` or `VCellChombo3D_x64 ...` | `exec`s the solver with those arguments unchanged, so its exit code and SIGTERM pass through |
 | anything else | prints usage on stderr and exits 2 |
 
-The entry point writes nothing, and it works as any uid. The solver writes its
-results next to `BASE_FILE_NAME`, plus one scratch file (each timepoint's
-`.sim.hdf5`, before zipping) in the current directory. If the current
-directory is not writable, as can happen in a read-only SIF, the entry point
-first makes any relative input path absolute and then starts the solver in
-`$TMPDIR` (default `/tmp`). VCell always writes an absolute `BASE_FILE_NAME`,
-so the results go to the same place in either case.
+The entry point writes nothing, and it works as any uid. The solver writes only
+next to the input's `BASE_FILE_NAME`. Before this release it also wrote each
+timepoint's scratch `.sim.hdf5` into the current directory, which fails in a
+read-only container or under an unprivileged user in someone else's directory.
+The scratch file now goes next to the results, and it keeps its bare name in
+the `.log` and the zip. The image and SIF therefore need nothing writable apart
+from the `/simdata` bind.
 
 SlurmProxy's command line works as written:
 
