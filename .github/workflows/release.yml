@@ -46,6 +46,9 @@ jobs:
         include:
           - { arch: x86_64,  runner: ubuntu-24.04,     asset: linux64,    conan_arch: x86_64 }
           - { arch: aarch64, runner: ubuntu-24.04-arm, asset: linux64arm, conan_arch: armv8 }
+    defaults:
+      run:
+        shell: bash
     env:
       CC: /opt/rh/gcc-toolset-13/root/usr/bin/gcc
       CXX: /opt/rh/gcc-toolset-13/root/usr/bin/g++

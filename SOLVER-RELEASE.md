@@ -36,7 +36,7 @@ Every archive is flat, with everything at its root:
 ```
 VCellChombo2D_x64          the solvers, under the names VCell resolves
 VCellChombo3D_x64            (SolverExecutable.VCellChombo + _x64)
-libgfortran.so.5 ...       bundled GCC runtime (Linux: libgfortran, libquadmath;
+libgfortran.so.5 ...       bundled GCC runtime (Linux: libgfortran, libquadmath, libz;
                              macOS: libgfortran, libquadmath, libstdc++, libgcc_s)
 LICENSE                    this repository's licence (MIT)
 THIRD-PARTY-LICENSES/      Chombo (BSD, notice required in binary redistributions),

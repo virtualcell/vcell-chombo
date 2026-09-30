@@ -8,14 +8,15 @@
 # walked with ldd; anything that is not part of glibc or the base C++ runtime
 # every Linux system ships (libstdc++, libgcc_s) is copied next to them, and
 # every ELF file gets RUNPATH=$ORIGIN so it finds its neighbours wherever the
-# archive is unpacked. In practice that is libgfortran and libquadmath.
+# archive is unpacked. In practice that is libgfortran, libquadmath, and the
+# libz the system libgfortran links (the solvers' own zlib is static).
 #
 # glibc is never bundled; instead the check at the end fails the build if any
 # file needs a newer glibc symbol version than [max-glibc] (default 2.28, the
 # manylinux_2_28 baseline the release is built on).
 set -euo pipefail
 
-stage=${1:?stage dir}
+stage=$(cd "${1:?stage dir}" && pwd)
 max_glibc=${2:-2.28}
 
 # Provided by the system everywhere; never bundled.
@@ -34,7 +35,7 @@ bundle_closure() {
 		fi
 		if [ ! -e "$stage/$name" ]; then
 			cp -L "$path" "$stage/$name"
-			chmod 0644 "$stage/$name"
+			chmod 0755 "$stage/$name"
 			echo "  bundled $name (from $path)"
 			bundle_closure "$stage/$name"
 		fi
