@@ -77,7 +77,11 @@ jobs:
 
       - name: Install dependencies with Conan
         run: |
-          conan install . --build=missing \
+          # --build="*": Conan Center's Linux binaries are built on a newer glibc
+          # than this baseline. Its prebuilt m4 does not even run here, and a
+          # prebuilt static library could carry GLIBC_2.3x symbol references into
+          # the solvers. So the whole tree, tools included, is compiled on glibc 2.28.
+          conan install . --build="*" \
             -pr:a=conan-profiles/CI-CD/Linux-AMD64_profile.txt -s:a arch=${{ matrix.conan_arch }}
 
       - name: Configure
