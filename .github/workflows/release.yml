@@ -253,7 +253,8 @@ jobs:
           for f in "$RUNNER_TEMP"/unpacked/*; do
             if file -b "$f" | grep -q Mach-O; then
               codesign --verify "$f"
-              if otool -L "$f" | tail -n +2 | grep -Ev '^\s+(/usr/lib/|/System/|@rpath/)'; then
+              # Every dependency line of every slice; the per-slice "(architecture ...):" headers end in ':'.
+              if otool -arch all -L "$f" | grep -v ':$' | grep -Ev '^\s+(/usr/lib/|/System/|@rpath/)'; then
                 echo "::error::$(basename "$f") refers outside the archive"; exit 1
               fi
             fi
