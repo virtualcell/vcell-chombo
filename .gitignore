@@ -16,3 +16,7 @@ chombo/lib/mk/.check.*
 
 .idea/
 .DS_Store
+
+# Release packaging (packaging/, .github/workflows/release.yml)
+/dist/
+/stage/
