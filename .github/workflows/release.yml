@@ -72,7 +72,10 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           $CXX --version | head -1; $FC --version | head -1
           python -m pip install --upgrade pip
-          python -m pip install 'conan>=2.0' numpy h5py
+          # ninja and cmake on PATH for the dependency builds: the profile selects
+          # the Ninja generator for every package, and only this recipe itself
+          # tool_requires ninja.
+          python -m pip install 'conan>=2.0' numpy h5py ninja cmake
           conan --version
 
       - name: Install dependencies with Conan

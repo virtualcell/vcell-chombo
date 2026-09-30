@@ -92,13 +92,26 @@ write another one:
 - `TIME_STEP` is not a recognized token in this solver (unlike the FV solver's
   input format). Use `TIME_INTERVALS`.
 
+## Releases
+
+`SOLVER-RELEASE.md` is the source of truth for what a release contains and how
+it is checked. `.github/workflows/release.yml` builds it. Things that bite:
+
+- The Linux release builds in `manylinux_2_28` with gcc-toolset-13, and
+  compiles the whole Conan tree from source (`--build="*"`), because Conan
+  Center's Linux binaries need a newer glibc. `packaging/bundle-linux.sh`
+  fails the build if any file needs a glibc newer than 2.28.
+- The macOS dylibs are bundled, not static. After changing link flags, check
+  that `packaging/bundle_macos.py` still finds everything; it fails on any
+  reference outside the archive.
+- `tests/release/check_release.py` is the release-level test. ctest is the
+  build-level one. Keep the two in step when you add an input.
+
 ## What is missing
 
-- **Numerical regression tests.** The smoke tests prove the pipeline runs and
-  writes the files VCell expects; nothing compares values against a baseline.
-- **CI.** No `.github/workflows/` yet.
-- **macOS and Windows.** Only Linux/GCC has been exercised since the split. The
-  CMake keeps the `APPLE` branches (`CH_Darwin`, no memory tracking) but they are
-  untested. Windows went through Cygwin historically; `conanfile.py` rejects it.
 - **MPI.** `OPTION_TARGET_PARALLEL` carries the old plumbing and warns at
-  configure time. Untested.
+  configure time. It is untested, and the release is serial only.
+- **Windows.** `conanfile.py` rejects it. The MinGW-w64 attempt on the
+  `windows-ci` branch stops in Chombo's `AMRTools`.
+- **VCell-generated inputs.** Every input in `tests/resources/` is
+  hand-written. None has yet come out of VCell's `FiniteVolumeFileWriter`.

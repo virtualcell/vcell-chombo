@@ -21,6 +21,15 @@ the solver had stopped being built (see [Provenance](#provenance)).
 | `cmake/` | the Chombo build driver and `GetGitRevisionDescription` |
 | `tests/` | ctest smoke coverage |
 
+## Releases
+
+Tagged releases (`vX.Y.Z` on `main`) publish portable archives for Linux x86_64,
+Linux aarch64 and universal macOS, a multi-arch image
+`ghcr.io/virtualcell/vcell-chombo:<X.Y.Z>`, and an Apptainer SIF
+`ghcr.io/virtualcell/vcell-chombo_singularity:<X.Y.Z>`. They follow VCell's
+solver release contract. See [SOLVER-RELEASE.md](SOLVER-RELEASE.md) for what
+each one contains, the container entry point, and how the releases are checked.
+
 ## Build
 
 CMake-driven; Conan 2.x supplies HDF5, zlib, libzip and (with messaging on)
