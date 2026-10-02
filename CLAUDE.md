@@ -172,8 +172,18 @@ it is checked. `.github/workflows/release.yml` builds it. Things that bite:
   - flang warns `Character in fixed-form label field must be a digit` on every
     ChomboFortran file. `fort72` starts statements at column 4, inside fixed
     form's 1–5 label field; gfortran accepts that silently and flang recovers
-    with a warning. It compiles — whether it computes the same numbers is
-    unproven. Run the regression baselines before silencing it with
-    `-Wno-scanning`.
+    with a warning. The recovery is exactly correct: a parity run swapping only
+    the Fortran compiler reproduced the stored regression baselines *bit for
+    bit*, so the warning can be silenced with `-Wno-scanning`. See
+    `tests/README.md` for the figure.
+  - flang cannot be paired with GCC as the ChomboFortran preprocessor, and this
+    one is worth knowing before it happens. `g++` implicitly includes
+    `stdc-predef.h`, the mandatory `-C` keeps its comments in the generated
+    `.f`, and the apostrophe in `glibc's intent ...` reads to flang's
+    fixed-form scanner as an unclosed character literal — a syntax error
+    pointing at a copyright notice in a file nobody wrote. gfortran survives it
+    only because its own `-cpp` pass strips C comments; flang's does not. clang
+    never injects the header, so clang is the preprocessor to use; configuring
+    the bad pairing is now a `FATAL_ERROR` rather than that scanner error.
 - **VCell-generated inputs.** Every input in `tests/resources/` is
   hand-written. None has yet come out of VCell's `FiniteVolumeFileWriter`.
