@@ -153,12 +153,13 @@ function(add_chombo_dimension DIM)
 	# implicit stdc-predef.h) are only removed on this second pass.  Chombo splits
 	# $(FC) on whitespace to recover the compiler name, so appending here is safe.
 	#
-	# flang needs it for the same reason but fails differently, and more quietly:
-	# gfortran rejects the surviving comments outright ("Non-numeric character in
-	# statement label"), while flang only warns and carries on. Omitting it there
-	# would leave C comment blocks in the compiled Fortran behind a warning.
-	if (CMAKE_Fortran_COMPILER_ID STREQUAL "GNU"
-			OR CMAKE_Fortran_COMPILER_ID MATCHES "Flang")
+	# GNU only, and not for want of trying it elsewhere. flang's -cpp does not
+	# strip C block comments, so it cannot serve this purpose: fed g++-preprocessed
+	# output it dies on the apostrophe in "glibc's intent to support IEC 559",
+	# inside the stdc-predef.h comment, with "Incomplete character literal". For
+	# flang the comments have to not be there in the first place -- see
+	# CHOMBO_CH_CPP below.
+	if (CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
 		set(_fc_name "${_fc_name} -cpp")
 	endif ()
 
@@ -173,9 +174,39 @@ function(add_chombo_dimension DIM)
 	# step that invokes neither. -x c says "preprocess this as text", which is the
 	# only thing this pass has ever meant. g++ handles the file directly, which is
 	# why Linux and macOS have never needed it.
-	set(_ch_cpp "${_cxx_name} -E -P -C")
-	if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-		string(APPEND _ch_cpp " -x c")
+	# Settable independently of $(CXX), because which C preprocessor runs this pass
+	# is not merely a matter of taste once the Fortran compiler is not gfortran.
+	set(CHOMBO_CH_CPP "" CACHE STRING
+			"C preprocessor command for ChomboFortran's output (default: $(CXX) -E -P -C)")
+
+	if (CHOMBO_CH_CPP)
+		set(_ch_cpp "${CHOMBO_CH_CPP}")
+	else ()
+		set(_ch_cpp "${_cxx_name} -E -P -C")
+		if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+			string(APPEND _ch_cpp " -x c")
+		endif ()
+
+		# GCC implicitly includes stdc-predef.h, and -C -- which is mandatory, or the
+		# preprocessor eats Fortran's // operator -- keeps its 33-line comment block
+		# in the generated .f. gfortran copes because its own -cpp pass strips C
+		# comments. flang's does not, and the block contains an apostrophe
+		# ("glibc's intent ..."), which its fixed-form scanner reads as an unclosed
+		# character literal: "Incomplete character literal", pointing at a copyright
+		# notice, from a file nobody wrote.
+		#
+		# clang does not inject that header, so a clang preprocessor produces output
+		# flang accepts -- and output otherwise byte-identical to g++'s, the comment
+		# block being the only difference between them.
+		if (CMAKE_Fortran_COMPILER_ID MATCHES "Flang"
+				AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+			message(FATAL_ERROR
+					"A flang Fortran compiler cannot be paired with GCC as the ChomboFortran "
+					"preprocessor. GCC implicitly includes stdc-predef.h, whose comments "
+					"survive the mandatory -C and which flang's scanner rejects. Set "
+					"CHOMBO_CH_CPP to a clang, for example "
+					"-DCHOMBO_CH_CPP=\"clang -E -P -C -x c\".")
+		endif ()
 	endif ()
 
 	# Chombo picks its flag sets by matching the basename of $(CXX) and $(FC)
