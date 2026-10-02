@@ -1,0 +1,256 @@
+name: flang parity (Linux)
+
+# Does swapping gfortran for flang change the numbers?
+#
+# That is the question gating the Windows move to clang-cl/flang, because the
+# requirement on this work is that the result matches what the solver produces
+# today on the other platforms. It is asked here rather than on Windows for the
+# same reason the earlier probe was: on Linux every other variable is already
+# known-good, so the Fortran compiler can be swapped on its own and anything
+# that moves is attributable to it.
+#
+# Deliberately NOT changing here:
+#
+#   * The C++ compiler. CXX stays the GCC 13 the Conan profile pins and the
+#     stored baselines were generated with, so every C++ object in the solver is
+#     the control's.
+#
+#     The ChomboFortran preprocessor is a separate matter and cannot stay GCC:
+#     g++ implicitly includes stdc-predef.h, the mandatory -C keeps its comments
+#     in the generated .f, and flang's scanner dies on the apostrophe in
+#     "glibc's intent ..." with "Incomplete character literal". gfortran only
+#     survives it because its own -cpp pass strips C comments; flang's does not.
+#     So CHOMBO_CH_CPP is pointed at clang here.
+#
+#     Attribution is still clean. An earlier probe diffed the two and the
+#     33-line comment block is the ONLY difference -- the Fortran itself is
+#     byte-identical -- so the compiled Fortran is the same text either way.
+#   * The tolerances. VCELL_CHOMBO_REGRESSION_RTOL stays at its 1e-9 default.
+#     Loosening it to get a pass would defeat the point; tests/README.md already
+#     says a failing regression test is a question, not a chore.
+#
+# The `control` job below is the same build with gfortran, on the same runner
+# image. It duplicates ci.yml's Linux job on purpose: ci.yml runs on pushes to
+# main and on pull requests, so a branch doing surgery on the shared Chombo
+# build path has nothing watching the GCC side until a PR exists. Changes to
+# cmake/BuildChomboLibs.cmake and to chombo/lib/src affect every platform, and
+# finding that out from the control here is cheaper than from a PR.
+#
+# macOS still is not covered by this workflow. That needs a pull request.
+
+on:
+  push:
+    branches: [ windows/flang-toolchain ]
+  workflow_dispatch:
+
+concurrency:
+  group: flang-parity-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Matched to what `choco upgrade llvm` installs on the Windows runner, which
+  # is what vcell-fvsolver's Windows profile pins (compiler.version=21).
+  # Ubuntu 24.04's own flang package is LLVM 18, several releases of flang
+  # maturity behind, so a result there would not predict the Windows one.
+  LLVM_VERSION: 21
+
+jobs:
+  parity:
+    name: Chombo Fortran under flang, against the GCC baselines
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+
+    steps:
+      - name: Check out repository and submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Verify the C++ toolchain still matches the Conan profile
+        run: |
+          # Same check ci.yml makes, and it matters more here: the point of this
+          # job is that only the Fortran half changes, so the C++ half has to be
+          # the one the baselines were built with.
+          expected=$(sed -n 's/^compiler\.version=//p' conan-profiles/CI-CD/Linux-AMD64_profile.txt)
+          for tool in gcc g++; do
+            actual=$("$tool" -dumpversion | cut -d. -f1)
+            echo "$tool: $actual (profile expects $expected)"
+            if [ "$actual" != "$expected" ]; then
+              echo "::error::$tool is version $actual but the profile pins compiler.version=$expected"
+              exit 1
+            fi
+          done
+
+      - name: Install clang and flang from apt.llvm.org
+        run: |
+          wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh "${LLVM_VERSION}" || true
+          FOUND=""
+          for v in "${LLVM_VERSION}" 20 19; do
+            if sudo apt-get install -y "clang-$v" "flang-$v"; then FOUND="$v"; break; fi
+          done
+          if [ -z "$FOUND" ]; then
+            echo "::error::no flang available from apt.llvm.org; tried ${LLVM_VERSION} 20 19"
+            exit 1
+          fi
+          echo "FC_BIN=flang-$FOUND" >> "$GITHUB_ENV"
+          echo "CPP_BIN=clang-$FOUND" >> "$GITHUB_ENV"
+          echo "::notice::building with flang-$FOUND"
+          "flang-$FOUND" --version | head -1
+
+      - name: Install Conan
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install 'conan>=2.0'
+
+      - name: Install dependencies with Conan
+        run: |
+          # FC is absent on purpose. Conan has no Fortran compiler setting, so
+          # the profile describes the C/C++ half only and the dependency
+          # packages are the same ones ci.yml resolves.
+          CC=gcc CXX=g++ conan install . --build=missing \
+            -pr:a=conan-profiles/CI-CD/Linux-AMD64_profile.txt
+
+      - name: Configure with flang as the Fortran compiler
+        run: |
+          # Redirected rather than piped through tee, because the guard step
+          # below reads this log and a pipeline would report tee's exit status
+          # instead of cmake's -- a configure failure would then look like a
+          # pass. That is the same trap BuildChomboLibs.cmake sets pipefail for,
+          # and it hid three macOS failures when it bit there.
+          source build/generators/conanbuild.sh
+          CC=gcc CXX=g++ FC="${FC_BIN}" cmake -B build -S . -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/build/generators/conan_toolchain.cmake" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_Fortran_COMPILER="${FC_BIN}" \
+            -DCHOMBO_CH_CPP="${CPP_BIN} -E -P -C -x c" \
+            -DOPTION_TARGET_MESSAGING=ON > /tmp/configure.log 2>&1 \
+            || { cat /tmp/configure.log; exit 1; }
+          cat /tmp/configure.log
+
+      - name: Confirm the toolchain CMake actually picked
+        run: |
+          # Cheap insurance against the job silently testing nothing: if CMake
+          # fell back to gfortran, every result below would be the control's.
+          #
+          # Anchored on CMake's own compiler identification rather than on the
+          # cache. The cache entry's type is not something to rely on -- CMake
+          # records a -D with no explicit type as STRING, not FILEPATH, which is
+          # what made the first version of this check a false negative that
+          # failed a correctly configured build.
+          grep -E "^CMAKE_(CXX|Fortran)_COMPILER:[A-Z]*=" build/CMakeCache.txt
+          grep -E "compiler identification is" /tmp/configure.log || true
+
+          if ! grep -qE "The Fortran compiler identification is .*Flang" /tmp/configure.log; then
+            echo "::error::CMake did not identify the Fortran compiler as Flang; this job would prove nothing"
+            exit 1
+          fi
+          if ! grep -qE "The CXX compiler identification is GNU" /tmp/configure.log; then
+            echo "::error::CXX is not GNU; the point of this job is that only the Fortran half changes"
+            exit 1
+          fi
+          echo "::notice::configured with GNU C++ and Flang Fortran, as intended"
+
+      - name: Build
+        run: |
+          source build/generators/conanbuild.sh
+          cmake --build build
+
+      - name: Test -- the regression baselines are the parity gate
+        run: |
+          source build/generators/conanbuild.sh
+          ctest --test-dir build --output-on-failure
+
+      - name: Measure the worst-case relative difference
+        if: always()
+        run: |
+          # compare_solution only reports the worst deviation when it fails, so
+          # ask it for an impossible tolerance on purpose: rtol=0 atol=0 reports
+          # anything that is not bit-identical, and the DIFF line then carries
+          # the actual worst relative difference.
+          #
+          # tests/README.md asks for that figure to be recorded whenever the
+          # tolerance is revisited, and it is the number that says how much
+          # headroom is left against the 1e-6 sensitivity floor measured there.
+          # Informational only -- the gate is the ctest step above.
+          for d in 2 3; do
+            work="build/tests/regress${d}d/extracted"
+            base="tests/resources/regress${d}d.baseline.txt"
+            final=$(ls -1 "$work"/SimID_regress${d}d_0_*.sim.hdf5 2>/dev/null | sort | tail -1 || true)
+            if [ -z "$final" ]; then
+              echo "  ${d}D: no extracted solution (the run above did not get that far)"
+              continue
+            fi
+            echo "::group::${d}D bit-exactness report vs $(basename "$base")"
+            ./build/bin/compare_solution --check "$final" "$base" 0 0 || true
+            echo "::endgroup::"
+          done
+
+  control:
+    name: The same build with gfortran (control)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+
+    steps:
+      - name: Check out repository and submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gfortran
+
+      - name: Install Conan
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install 'conan>=2.0'
+
+      - name: Install dependencies with Conan
+        run: |
+          CC=gcc CXX=g++ FC=gfortran conan install . --build=missing \
+            -pr:a=conan-profiles/CI-CD/Linux-AMD64_profile.txt
+
+      - name: Configure
+        run: |
+          source build/generators/conanbuild.sh
+          CC=gcc CXX=g++ FC=gfortran cmake -B build -S . -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/build/generators/conan_toolchain.cmake" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOPTION_TARGET_MESSAGING=ON
+
+      - name: Build
+        run: |
+          source build/generators/conanbuild.sh
+          cmake --build build
+
+      - name: Test
+        run: |
+          source build/generators/conanbuild.sh
+          ctest --test-dir build --output-on-failure
+
+      - name: Confirm the narrowed target list did not quietly skip a library
+        run: |
+          # `lib` used to build everything under chombo/lib/src; this now names
+          # only CHOMBO_LINK_ORDER. If a library the solver links were missing
+          # from that list the build would fail at link, but a library that is
+          # built and NOT linked would just waste time silently -- so check both
+          # directions against what actually landed.
+          for d in 2 3; do
+            echo "::group::${d}D archives"
+            ls -1 build/chombo/${d}d/lib/
+            n=$(ls -1 build/chombo/${d}d/lib/*.a | wc -l | tr -d ' ')
+            echo "  $n archives"
+            if [ "$n" != "9" ]; then
+              echo "::error::expected 9 archives for ${d}D, found $n"
+              exit 1
+            fi
+            echo "::endgroup::"
+          done
+          if ls chombo/lib/libamrtimedependent*.a >/dev/null 2>&1; then
+            echo "::error::AMRTimeDependent was built; the target list is not actually narrowed"
+            exit 1
+          fi
+          echo "::notice::9 archives per dimension, and AMRTimeDependent was not built"

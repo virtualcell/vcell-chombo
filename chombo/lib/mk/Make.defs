@@ -338,6 +338,28 @@ else
   endif
 endif
 
+# LLVM compilers.  Added by VCell for the Windows build; see
+# mk/compiler/Make.defs.LLVM.  Note that clang-cl arrives here as plain `clang`,
+# because $(cxxname) splits $(CXX) on '-' and keeps the first word -- both
+# spellings are matched for that reason.
+#
+# $(filter ...) rather than the $(findstring ...) idiom the blocks below use.
+# findstring is a substring test, and "clang++" contains "g++" -- so
+# $(findstring g++,clang clang++) returns g++ and a plain GCC build would pull
+# this block in on top of the GNU one, clobbering its flags. filter matches
+# whole words.
+#
+# An unrecognised toolchain is not diagnosed here: it matches no block, and
+# every flag silently falls back to the $def* values above, which is a bare `-O`
+# and none of the warning suppressions these sources expect.
+ifneq ($(filter $(cxxname),clang clang++),)
+  include $(CHOMBO_HOME)/mk/compiler/Make.defs.LLVM
+else
+  ifeq ($(fname),flang)
+    include $(CHOMBO_HOME)/mk/compiler/Make.defs.LLVM
+  endif
+endif
+
 # Intel compilers
 ifeq ($(findstring $(cxxname),icc ecc icpc),$(cxxname))
   include $(CHOMBO_HOME)/mk/compiler/Make.defs.Intel

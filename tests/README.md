@@ -58,6 +58,17 @@ What has actually been measured, rather than assumed:
 - **Sensitivity.** Perturbing the diffusion coefficient by a relative `1e-6` is
   caught; `1e-10` is not. So these tests detect algorithmic changes without being
   hostage to last-bit noise.
+- **Toolchain.** Swapping gfortran for flang (LLVM 21), holding the C++ half at
+  GCC 13 and preprocessing ChomboFortran with clang, reproduces these baselines
+  **bit for bit** — every dataset of both the 2D and 3D models matches at
+  `rtol=0 atol=0`, which this file's 17-significant-digit baselines make a
+  meaningful comparison rather than a rounding artifact. So the worst-case
+  relative difference for that toolchain change is zero, and no tolerance had to
+  move. It also settles flang's `Character in fixed-form label field must be a
+  digit` warning, which it emits on every ChomboFortran file because `fort72`
+  starts statements at column 4: its recovery is exactly correct, so silencing
+  that warning is defensible, and this run is the evidence for it.
+
 - **Portability.** The baselines are generated on Linux with GCC 13. The same
   source compiled for a different architecture will not reproduce these fields
   bit for bit, and the tolerance that survives that is an empirical question. CI

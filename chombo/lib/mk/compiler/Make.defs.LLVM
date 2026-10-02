@@ -1,0 +1,124 @@
+# -*- Mode: Makefile -*-
+
+### This is a compiler-specific definitions file for the LLVM compilers:
+### clang for C++ and flang for Fortran.
+###
+### Added by VCell, not part of upstream Chombo. It exists so the Windows build
+### can use clang-cl and flang, following vcell-fvsolver, which builds
+### fixed-form Fortran and C++ that way and produces native MSVC-ABI binaries.
+### MSVC alone cannot build Chombo at all -- it has no Fortran compiler, and
+### ChomboFortran is perl driving GNU make.
+###
+### Without this file an LLVM toolchain is not diagnosed, it is simply not
+### recognised: $(cxxname) and $(fname) match nothing, no compiler block is
+### included, and every flag falls back to the $def* values in Make.defs --
+### `-O` for optimisation and nothing else. The build then succeeds, slowly and
+### with none of the warning suppressions these sources expect, which is a worse
+### outcome than failing.
+###
+### See mk/compiler/Make.defs.GNU for the contract this has to satisfy; the
+### variables are the same.
+
+makefiles+=compiler/Make.defs.LLVM
+
+cxxname := $(notdir $(firstword $(subst -, ,$(CXX))))
+fname   := $(notdir $(firstword $(subst -, ,$(FC))))
+
+################################################################
+##
+## C++: clang
+##
+## Note that `clang-cl`, the MSVC-compatible driver, arrives here as plain
+## `clang`: $(cxxname) splits $(CXX) on '-' and keeps the first word. Both
+## spellings are handled by the dispatch in Make.defs for that reason.
+##
+################################################################
+
+ifneq ($(filter $(cxxname),clang clang++),)
+
+  # The same suppressions the GNU block applies, minus the ones that do not
+  # transfer:
+  #
+  #   * -ftemplate-depth-25 is deliberately absent. Chombo asks for a limit of
+  #     25, which is far below clang's default of 1024, and lowering it buys
+  #     nothing -- the flag exists in the GNU block because old g++ defaulted
+  #     to 17. clang also spells it -ftemplate-depth=N.
+  #   * -Wno-invalid-offsetof and -Wno-variadic-macros are both wanted:
+  #     Chombo's HOFFSET() use and its variadic macros draw the same complaints
+  #     from clang as from g++.
+  _cxxbaseflags := -Wno-long-long -Wno-sign-compare -Wno-deprecated \
+                   -Wno-invalid-offsetof -Wno-variadic-macros
+
+  defcxxcomflags := $(_cxxbaseflags)
+  defcxxoptflags := -O2 -funroll-loops
+  defcxxdbgflags := -g -Wall
+
+  ifeq ($(USE_64),TRUE)
+    defcxxcomflags += -m64
+  endif
+
+  # -C keeps comments through the preprocessor pass over ChomboFortran's output.
+  # It is not cosmetic: without it the preprocessor treats Fortran's `//` string
+  # concatenation operator as the start of a comment. The GNU block adds the
+  # same flag for the same reason.
+  #
+  # -x c is needed only by clang. Chombo pushes .F sources through $(CH_CPP)
+  # like any other Fortran file, and clang's driver recognises .F as Fortran,
+  # cannot compile it, and hands it to gcc -- which dispatches to gfortran,
+  # which refuses -E without -cpp. The failure names two compilers that the
+  # failing step never invoked. -x c says "preprocess this as text", which is
+  # the only thing this pass has ever meant.
+  CH_CPP += -C -x c
+
+endif
+
+################################################################
+##
+## Fortran: flang
+##
+################################################################
+
+ifeq ($(fname),flang)
+
+  # Matching what the gfortran block uses, so the two toolchains optimise the
+  # same way. Chombo's own default is a bare `-O`.
+  deffoptflags = -O2 -funroll-loops
+  deffdbgflags = -g
+
+  # Insurance rather than a fix, and worth being precise about: flang defaults
+  # to -ffp-contract=fast, which fuses multiply-adds and would change results.
+  # On baseline x86-64 it cannot actually do so -- FMA is not in the base ISA,
+  # so no -march means no FMA to fuse with -- which is why flang already
+  # reproduces the gfortran regression baselines bit for bit without this flag.
+  # It matters the moment anyone adds -march, or builds for an ISA that carries
+  # FMA in its base, such as aarch64. Costing nothing where it is a no-op, it is
+  # set explicitly so the intent survives either change.
+  deffcomflags = -ffp-contract=off
+
+  # ChomboFortran's fort72 pass starts statements in column 4, inside fixed
+  # form's 1-5 label field. gfortran accepts that silently; flang reports
+  # "Character in fixed-form label field must be a digit" on every single file,
+  # which buries everything else.
+  #
+  # Suppressed rather than corrected, on purpose. flang's recovery is exactly
+  # right -- a parity run swapping only the Fortran compiler reproduced the
+  # stored regression baselines bit for bit, so nothing is being hidden. Fixing
+  # fort72 to pad to column 7 would be the tidier answer, but it would change
+  # the generated Fortran on every platform to silence a warning on one, and
+  # that is a poor trade against the bit-identity just established.
+  deffcomflags += -Wno-scanning
+
+  ifeq ($(USE_64),TRUE)
+    deffcomflags += -m64
+  endif
+
+  # Deliberately empty. The Fortran runtime library has been renamed across
+  # LLVM releases -- FortranRuntime and FortranDecimal, then flang_rt.runtime --
+  # so naming it here would pin this file to one release. `make lib` only
+  # compiles and archives, so Chombo never links a Fortran program itself, and
+  # the solver's own link takes CMAKE_Fortran_IMPLICIT_LINK_LIBRARIES in
+  # VCellChombo/CMakeLists.txt, which CMake fills in from whichever flang is in
+  # use.
+  defflibflags =
+
+endif

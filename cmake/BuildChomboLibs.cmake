@@ -152,8 +152,61 @@ function(add_chombo_dimension DIM)
 	# operator -- so the C comment blocks that survive (starting with gcc's
 	# implicit stdc-predef.h) are only removed on this second pass.  Chombo splits
 	# $(FC) on whitespace to recover the compiler name, so appending here is safe.
+	#
+	# GNU only, and not for want of trying it elsewhere. flang's -cpp does not
+	# strip C block comments, so it cannot serve this purpose: fed g++-preprocessed
+	# output it dies on the apostrophe in "glibc's intent to support IEC 559",
+	# inside the stdc-predef.h comment, with "Incomplete character literal". For
+	# flang the comments have to not be there in the first place -- see
+	# CHOMBO_CH_CPP below.
 	if (CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
 		set(_fc_name "${_fc_name} -cpp")
+	endif ()
+
+	# The command for the C preprocessor pass over ChomboFortran's output; see the
+	# comment on CH_CPP below for why it is set explicitly at all.
+	#
+	# clang needs -x c. There is one .F file in the libraries this builds,
+	# AMRTools/CFLeastSquares.F, and Make.rules pushes it through $(CH_CPP) like
+	# any other Fortran source. clang's driver recognises .F as Fortran, cannot
+	# compile it, and delegates to gcc, which dispatches to gfortran, which
+	# refuses -E without -cpp -- so the build fails naming gcc and gfortran from a
+	# step that invokes neither. -x c says "preprocess this as text", which is the
+	# only thing this pass has ever meant. g++ handles the file directly, which is
+	# why Linux and macOS have never needed it.
+	# Settable independently of $(CXX), because which C preprocessor runs this pass
+	# is not merely a matter of taste once the Fortran compiler is not gfortran.
+	set(CHOMBO_CH_CPP "" CACHE STRING
+			"C preprocessor command for ChomboFortran's output (default: $(CXX) -E -P -C)")
+
+	if (CHOMBO_CH_CPP)
+		set(_ch_cpp "${CHOMBO_CH_CPP}")
+	else ()
+		set(_ch_cpp "${_cxx_name} -E -P -C")
+		if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+			string(APPEND _ch_cpp " -x c")
+		endif ()
+
+		# GCC implicitly includes stdc-predef.h, and -C -- which is mandatory, or the
+		# preprocessor eats Fortran's // operator -- keeps its 33-line comment block
+		# in the generated .f. gfortran copes because its own -cpp pass strips C
+		# comments. flang's does not, and the block contains an apostrophe
+		# ("glibc's intent ..."), which its fixed-form scanner reads as an unclosed
+		# character literal: "Incomplete character literal", pointing at a copyright
+		# notice, from a file nobody wrote.
+		#
+		# clang does not inject that header, so a clang preprocessor produces output
+		# flang accepts -- and output otherwise byte-identical to g++'s, the comment
+		# block being the only difference between them.
+		if (CMAKE_Fortran_COMPILER_ID MATCHES "Flang"
+				AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+			message(FATAL_ERROR
+					"A flang Fortran compiler cannot be paired with GCC as the ChomboFortran "
+					"preprocessor. GCC implicitly includes stdc-predef.h, whose comments "
+					"survive the mandatory -C and which flang's scanner rejects. Set "
+					"CHOMBO_CH_CPP to a clang, for example "
+					"-DCHOMBO_CH_CPP=\"clang -E -P -C -x c\".")
+		endif ()
 	endif ()
 
 	_chombo_hdf5_flags(_hdf_inc_flags _hdf_lib_flags)
@@ -164,10 +217,10 @@ function(add_chombo_dimension DIM)
 		set(_use64 FALSE)
 	endif ()
 
-	add_custom_command(
-			OUTPUT ${_libs} ${_stamp}
-			COMMENT "Building Chombo ${DIM}D libraries (this takes a few minutes)"
-			COMMAND ${CHOMBO_MAKE_PROGRAM} -j${CHOMBO_BUILD_JOBS} lib
+	# Hoisted into a list because two make invocations need the same set. Every
+	# one of these is a command-line override, which beats anything a makefile
+	# sets -- the reason this build needs no generated mk/Make.defs.local.
+	set(_make_vars
 			# --- what gets built ---
 			DIM=${DIM}
 			USE_EB=TRUE          # embedded boundary code -- the whole point for VCell
@@ -198,7 +251,7 @@ function(add_chombo_dimension DIM)
 			#
 			# pipefail has been in bash since 3.0, so even the 3.2 that macOS still
 			# ships is fine.
-			CSHELLCMD=${CHOMBO_BASH_PROGRAM}\ -o\ pipefail\ -c
+			"CSHELLCMD=${CHOMBO_BASH_PROGRAM} -o pipefail -c"
 			# The C preprocessor Chombo runs over ChomboFortran's output. Set
 			# explicitly because the Darwin block in lib/mk/Make.defs forces
 			# CH_CPP=/usr/bin/cpp -E, working around g77 not supporting -E; g77 is
@@ -212,10 +265,10 @@ function(add_chombo_dimension DIM)
 			# Make.defs.defaults, plus -C from Make.defs.GNU), so both platforms now
 			# take the same path. -C is essential and not cosmetic: it keeps
 			# comments, without which the preprocessor eats Fortran's // operator.
-			CH_CPP=${_cxx_name}\ -E\ -P\ -C
+			"CH_CPP=${_ch_cpp}"
 			# --- HDF5 ---
-			HDFINCFLAGS=${_hdf_inc_flags}
-			HDFLIBFLAGS=${_hdf_lib_flags}
+			"HDFINCFLAGS=${_hdf_inc_flags}"
+			"HDFLIBFLAGS=${_hdf_lib_flags}"
 			# Deliberately NOT setting fcppflags=-cpp here, which VCell's old
 			# Make.defs.local.linux did and which was carried over for parity.
 			# fcppflags is appended to $(CH_CPP), the C preprocessor run over
@@ -230,6 +283,41 @@ function(add_chombo_dimension DIM)
 			# .cpre came out empty, then the .f, then an object file with no
 			# symbols, and the build only fell over at link with undefined Fortran
 			# references far from the cause.
+			#
+			# Chombo is far older than C++20 and does not need it. Pinned rather than
+			# left to the compiler's default, which is what it has been relying on:
+			# GCC 13 and clang 21 both default to gnu++17, so this changes nothing
+			# today. A compiler whose default moves to C++20 would silently change
+			# what these archives are compiled as, and that is not hypothetical --
+			# MSYS2's GCC 16 does exactly that, and `using namespace std;` at global
+			# scope in CH_Timer.H and Tuple.H then collides Chombo's own integral()
+			# with the std::integral concept.
+			#
+			# This holds the archives at the standard they are already built with
+			# everywhere, rather than letting any platform become the first to compile
+			# Chombo as C++20. The solver's own translation units stay C++20, which
+			# the submodules require; that split is the status quo, not a new one.
+			XTRACXXFLAGS=-std=gnu++17)
+
+	add_custom_command(
+			OUTPUT ${_libs} ${_stamp}
+			COMMENT "Building Chombo ${DIM}D libraries (this takes a few minutes)"
+			# Only the libraries CHOMBO_LINK_ORDER names, rather than `lib`, which
+			# builds every library under chombo/lib/src. Those lowercase names are
+			# targets in chombo/lib/GNUmakefile aliasing the directories, so this one
+			# list stays the single source of truth for what is built and what is
+			# linked.
+			#
+			# It removes a class of problem rather than merely saving time.
+			# AMRTimeDependent and EBAMRTimeDependent are linked by nothing here, and
+			# AMRTimeDependent/AMR.cpp installs a Ctrl-C handler through sigaction,
+			# which Windows has no equivalent for. Not building it is a better answer
+			# than porting it.
+			COMMAND ${CHOMBO_MAKE_PROGRAM} -j${CHOMBO_BUILD_JOBS} ${CHOMBO_LINK_ORDER} ${_make_vars}
+			# `lib` ran this itself once its libraries were built. It copies each
+			# library's public headers -- the generated *_F.H among them -- into
+			# chombo/lib/include, which is what CollectChomboLibs.cmake snapshots.
+			COMMAND ${CHOMBO_MAKE_PROGRAM} include ${_make_vars}
 			WORKING_DIRECTORY "${CHOMBO_LIB_DIR}"
 			COMMAND ${CMAKE_COMMAND}
 			-DCHOMBO_LIB_DIR=${CHOMBO_LIB_DIR}

@@ -60,7 +60,14 @@ class VisItPythonConnection
     int         readbufferlen;
     char       *readbuffer;
 
+#ifdef _WIN32
+    // pid_t is POSIX and absent from the MSVC runtime. The member is only ever
+    // written by the fork() in the implementation, which Windows does not
+    // compile, so the type just has to exist and compare against -1 and 0.
+    int         visitpid;
+#else
     pid_t       visitpid;
+#endif
     std::string error;
 };
 
