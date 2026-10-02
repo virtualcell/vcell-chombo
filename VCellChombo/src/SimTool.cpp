@@ -21,15 +21,21 @@ using std::endl;
 #include <VCELL/PostProcessingHdf5Writer.h>
 #include <VCELL/ZipUtils.h>
 
+#include <chrono>
 #include <float.h>
 #include <math.h>
+#include <thread>
 #include <sys/types.h>
 #include <sys/stat.h>
 
+// SimTool constructs a VCellModel unconditionally, so this cannot live inside
+// the UNIX-only block below -- where it was. Nothing has compiled this file with
+// WIN32 defined since the Cygwin build was retired, which is the only reason it
+// never showed up.
+#include "VCELL/VCellModel.h"
+
 #if ( !defined(WIN32) && !defined(WIN64) ) // UNIX
 #include <unistd.h>
-
-#include "VCELL/VCellModel.h"
 #endif
 
 #define DIRECTORY_SEPARATOR_WINDOWS '\\'
@@ -171,11 +177,10 @@ void SimTool::setPrimaryDataDir(string& pd)
 }
 
 static void retryWait(int seconds) {
-#if ( defined(WIN32) || defined(WIN64) )
-	Sleep(seconds * 1000);
-#else
-	sleep(seconds);
-#endif
+	// Was Sleep() on Windows and sleep() elsewhere. Sleep() needs <windows.h>,
+	// which this file has never included, so that branch could not have compiled.
+	// The project is C++20, so one portable call replaces the split outright.
+	std::this_thread::sleep_for(std::chrono::seconds(seconds));
 }
 
 static FILE* openFileWithRetry(const char* fileName, const char* mode) {
