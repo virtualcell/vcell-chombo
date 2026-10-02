@@ -52,15 +52,34 @@ dimension-dependent and get overwritten. The builds are serialized
 `build/chombo/<dim>d/include/`. Never point a solver target at
 `chombo/lib/include` directly.
 
+**Chombo's config string carries the full compiler names.** The archives and
+the `o/`, `f/`, `p/` and `d/` directories are named for `$(CXX)` and `$(FC)`
+exactly as passed — `2d.Linux.64.g++-13.gfortran-13.OPT` if that is what you
+gave it. The CMake path looks different only because
+`_chombo_compiler_name()` in `BuildChomboLibs.cmake` deliberately strips them
+to `g++`/`gfortran`, since Chombo matches basenames to pick its flag sets.
+Anything that matches those directory names has to cope with both forms.
+
+**Chombo's HDF5 guards are inconsistent.** `EBAMRIO.H` declares
+`writeEBLevelname` and `writeEBAMRname` inside `#ifdef CH_USE_HDF5`, but
+`EBConductivityOp::dumpAMR`/`dumpLevel` and `EBAMRPoissonOp::dumpAMR`/
+`dumpLevel` call them unguarded, while `EBViscousTensorOp.H` guards its
+equivalents. Every real build is `USE_HDF=TRUE`, so this never shows — but a
+`USE_HDF=FALSE` build fails in `EBAMRElliptic` for a reason unrelated to
+whatever you were changing.
+
 **Chombo's build leaks into the source tree.** `chombo/lib/*.a`,
 `chombo/lib/include/`, `chombo/lib/src/*/{o,d,f,p}/` and generated `*_F.H` are
 all gitignored build products. If `CollectChomboLibs.cmake` reports finding two
 candidate archives for one library, that is stale output from a different
 configuration — clean the tree.
 
-**GCC, not Clang.** gfortran's runtime links against libstdc++, so the whole
-build has to be a libstdc++ world. Do not copy vcell-ode's Clang/libc++/mold
-profile here.
+**GCC, not Clang — on Linux and macOS.** gfortran's runtime links against
+libstdc++, so those builds have to be a libstdc++ world. Do not copy
+vcell-ode's Clang/libc++/mold profile here. Windows is the exception and is
+heading the other way, to clang-cl and flang: MSVC has no Fortran at all, and
+CPython's Windows ABI rules out MinGW for the eventual pybind11 wheel. See
+*What is missing*.
 
 ## Modifying Chombo
 
@@ -111,7 +130,50 @@ it is checked. `.github/workflows/release.yml` builds it. Things that bite:
 
 - **MPI.** `OPTION_TARGET_PARALLEL` carries the old plumbing and warns at
   configure time. It is untested, and the release is serial only.
-- **Windows.** `conanfile.py` rejects it. The MinGW-w64 attempt on the
-  `windows-ci` branch stops in Chombo's `AMRTools`.
+- **Windows.** No build yet; `conanfile.py` still rejects it. Two attempts are
+  on record. Both were done on throwaway branches; the findings live here
+  rather than on them.
+
+  *MinGW-w64* (`windows-ci`, Aug 2026) built the entire Conan dependency tree
+  and then hit **four** independent failures, not the single `AMRTools` one
+  this file used to claim:
+
+  - `j1()` is absent from mingw-w64's `<math.h>` (it is POSIX XSI). MSVC
+    declares it as a deprecated alias for `_j1`, which is why
+    `vcell-stochastic` builds the same `vcell-expressionparser` commit on
+    Windows without a fix — the gap is MinGW's, not Windows'.
+  - `sigaction` in `AMRTimeDependent/AMR.cpp` — a library `CHOMBO_LINK_ORDER`
+    never links, but `make lib` builds anyway.
+  - `fork`/`pipe` in `BaseTools/CH_Attach.cpp`, dead code whose only callers
+    are commented out in Chombo's own tests.
+    `BoxTools/VisItPythonConnection.cpp` and `BaseTools/memusage.cpp` are the
+    same shape.
+  - `std::integral` colliding with Chombo's `integral()` in
+    `AMRTools/NodeIntegrals.cpp`, because `CH_Timer.H` and `Tuple.H` do
+    `using namespace std;` at global scope and MSYS2's GCC 16 defaults to
+    C++20 or later. Not a Windows problem at all — pin Chombo's own build to
+    `-std=gnu++17` and it matches what GCC 13 already gives Linux and macOS.
+
+  *clang-cl/flang* (`probe/clang-flang`, Oct 2026) follows `vcell-fvsolver`,
+  which builds 167 fixed-form `.f` files plus a pybind11 wheel that way. A
+  Linux probe holding `CXX=g++-13` constant and swapping only the Fortran half
+  showed flang compiles ChomboFortran's generated output: 41 files, all nine
+  linked libraries, zero Fortran errors. `clang -E -P -C` output is
+  byte-identical to `g++ -E -P -C`'s apart from the 33-line `stdc-predef.h`
+  comment block GCC implicitly includes and clang does not. Two things that
+  route needs:
+
+  - `-x c` on `CH_CPP`. There is one `.F` file, `AMRTools/CFLeastSquares.F`,
+    and `Make.rules:443` pushes it through `$(CH_CPP)`. clang's driver
+    recognises `.F` as Fortran, cannot compile it, and delegates to `gcc`,
+    which dispatches to gfortran, which refuses `-E` without `-cpp` — so the
+    error names gcc from a step that never mentions it. `-x c` says
+    "preprocess this as text", which is all the pipeline ever meant.
+  - flang warns `Character in fixed-form label field must be a digit` on every
+    ChomboFortran file. `fort72` starts statements at column 4, inside fixed
+    form's 1–5 label field; gfortran accepts that silently and flang recovers
+    with a warning. It compiles — whether it computes the same numbers is
+    unproven. Run the regression baselines before silencing it with
+    `-Wno-scanning`.
 - **VCell-generated inputs.** Every input in `tests/resources/` is
   hand-written. None has yet come out of VCell's `FiniteVolumeFileWriter`.
