@@ -1,0 +1,269 @@
+name: clang/flang probe
+
+# Throwaway reconnaissance for moving the Windows build onto clang-cl/flang,
+# the toolchain vcell-fvsolver already uses to build fixed-form Fortran plus
+# C++ plus a pybind11 wheel on Windows. Deleted once the question is answered.
+#
+# One question decides whether that route exists at all:
+#
+#   Does flang digest ChomboFortran's GENERATED Fortran?
+#
+# fvsolver proves flang handles hand-written fixed-form F77 (167 .f files under
+# PCGPack/). It proves nothing about ChomboFortran's output, which is produced
+# by a perl preprocessor, pushed through `$(CXX) -E -P -C`, filtered by two more
+# perl passes, and only then compiled. That pipeline is the risk, not the
+# Fortran dialect.
+#
+# The probe asks it on LINUX, not Windows, and that is the point. On Linux every
+# other variable is already known-good, so the Fortran compiler can be swapped
+# on its own:
+#
+#   control:  CXX=g++-13   FC=gfortran-13  CH_CPP="g++-13 -E -P -C"
+#   test:     CXX=g++-13   FC=flang-N      CH_CPP="clang-N -E -P -C"
+#
+# Chombo bakes the compiler names into its config string, so the two runs land
+# in separate output directories (2d.Linux.64.g++.gfortran.OPT and
+# 2d.Linux.64.g++.flang.OPT) and the generated .f files from both survive side
+# by side for comparison. That yields three separate signals from one job:
+#
+#   1. diff of the .f files -- does clang's preprocessor produce the same
+#      Fortran as g++'s? This half is textual and can be settled exactly.
+#   2. does flang compile those .f files at all?
+#   3. does it hold across every ChomboFortran source in the libraries the
+#      solver actually links, not just one file?
+#
+# A failure on Linux is a flang/ChomboFortran incompatibility and kills the
+# route cheaply. A pass moves the remaining risk onto Windows-specific
+# plumbing, which is engineering rather than an open question.
+#
+# USE_HDF=FALSE throughout: HDF5 has nothing to do with the Fortran pipeline and
+# leaving it out removes the whole dependency install from a probe.
+
+on:
+  push:
+    branches: [ probe/clang-flang ]
+  workflow_dispatch:
+
+concurrency:
+  group: clang-flang-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Matched to what `choco upgrade llvm` installs on the Windows runner, which
+  # is what fvsolver's profile pins (compiler.version=21). Ubuntu 24.04's own
+  # `flang` package is LLVM 18 -- several releases of flang maturity behind, so
+  # a failure there would not be evidence about the Windows toolchain.
+  LLVM_VERSION: 21
+
+jobs:
+  fortran-pipeline:
+    name: ChomboFortran through clang/flang (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository and submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install the control toolchain (GCC 13, as the baselines were built with)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-13 g++-13 gfortran-13 perl make
+          make --version | head -1
+
+      - name: Install clang and flang from apt.llvm.org
+        run: |
+          wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh "${LLVM_VERSION}" || true
+          # flang is not installed by llvm.sh. Walk back from the pinned version
+          # rather than failing on one unavailable package, and report what was
+          # actually used -- the version matters when reading the result.
+          FOUND=""
+          for v in "${LLVM_VERSION}" 20 19; do
+            if sudo apt-get install -y "clang-$v" "flang-$v"; then FOUND="$v"; break; fi
+          done
+          if [ -z "$FOUND" ]; then
+            echo "::error::no flang available from apt.llvm.org; candidates tried: ${LLVM_VERSION} 20 19"
+            apt-cache search --names-only '^flang' || true
+            exit 1
+          fi
+          echo "LLVM_FOUND=$FOUND" >> "$GITHUB_ENV"
+          echo "::notice::using clang-$FOUND / flang-$FOUND"
+          "clang-$FOUND" --version | head -1
+          "flang-$FOUND" --version | head -1
+
+      - name: Confirm Chombo resolves FC=flang-N to fname=flang
+        run: |
+          # Make.defs line 45: fname := $(notdir $(firstword $(subst -, ,$(FC))))
+          # It splits on '-', so flang-21 must reduce to flang the same way
+          # gfortran-13 reduces to gfortran on the macOS build. If this ever
+          # stops holding, the new compiler block would silently not be selected.
+          cat > /tmp/fname.mk <<'EOF'
+          fname := $(notdir $(firstword $(subst -, ,$(FC))))
+          check:
+          	@echo "  FC=$(FC) -> fname=$(fname)"
+          	@test "$(fname)" = "flang" || { echo "::error::FC=$(FC) resolved to fname=$(fname), expected flang"; exit 1; }
+          EOF
+          make -f /tmp/fname.mk check FC="flang-${LLVM_FOUND}"
+
+      - name: Control -- build BoxTools with GCC 13 (proves the harness)
+        working-directory: chombo/lib
+        run: |
+          make -j"$(nproc)" BoxTools \
+            DIM=2 USE_EB=TRUE USE_MF=TRUE USE_HDF=FALSE USE_64=TRUE \
+            MPI=FALSE DEBUG=FALSE OPT=TRUE \
+            CXX=g++-13 \
+            FC="gfortran-13 -cpp" \
+            PERL=perl \
+            CSHELLCMD="bash -o pipefail -c" \
+            CH_CPP="g++-13 -E -P -C"
+
+      - name: Test -- same build, Fortran compiler swapped to flang
+        id: flang_boxtools
+        working-directory: chombo/lib
+        continue-on-error: true
+        run: |
+          # CXX stays g++-13 so the C++ half is byte-for-byte the control's and
+          # only the Fortran path changes.
+          #
+          # FFLAGS is overridden because the GNU compiler block's Fortran flags
+          # are gfortran-specific -- -fno-second-underscore and
+          # -Wno-line-truncation have no flang equivalents. Dropping
+          # -fno-second-underscore is safe: it is a g77-ism, and gfortran and
+          # flang both default to a single trailing underscore, which is what
+          # -DCH_FORT_UNDERSCORE on the C++ side expects.
+          #
+          # -ffp-contract=off is the parity flag, not a performance one. flang
+          # defaults to fusing multiply-adds; GCC at -O2 -m64 with no -march
+          # emits no FMA on baseline x86-64, so `off` is what reproduces the
+          # numbers the stored baselines were generated with.
+          make -j"$(nproc)" BoxTools \
+            DIM=2 USE_EB=TRUE USE_MF=TRUE USE_HDF=FALSE USE_64=TRUE \
+            MPI=FALSE DEBUG=FALSE OPT=TRUE \
+            CXX=g++-13 \
+            FC="flang-${LLVM_FOUND}" \
+            PERL=perl \
+            CSHELLCMD="bash -o pipefail -c" \
+            CH_CPP="clang-${LLVM_FOUND} -E -P -C" \
+            FFLAGS="-O2 -funroll-loops -ffp-contract=off"
+
+      - name: Signal 1 -- is clang's preprocessor output identical to g++'s?
+        working-directory: chombo/lib
+        run: |
+          # The .f files are the whole contract between the preprocessing half
+          # and the compile half. If these match, every remaining question is
+          # about flang itself and none is about ChomboFortran.
+          CTL=$(find . -type d -name '2d.Linux.64.g++.gfortran.OPT' -path '*/f/*' | head -1)
+          TST=$(find . -type d -name '2d.Linux.64.g++.flang.OPT'    -path '*/f/*' | head -1)
+          echo "control: ${CTL:-<none>}"
+          echo "test:    ${TST:-<none>}"
+          if [ -z "$CTL" ] || [ -z "$TST" ]; then
+            echo "::warning::one side produced no .f files; see the build steps above"
+            exit 0
+          fi
+          echo "--- generated .f files ---"
+          ls -la "$CTL" "$TST"
+          if diff -r "$CTL" "$TST"; then
+            echo "::notice::clang and g++ produce IDENTICAL ChomboFortran output -- the preprocessing half is settled"
+          else
+            echo "::warning::preprocessor output differs; the diff above is the thing to read"
+          fi
+
+      - name: Signal 3 -- every ChomboFortran source in the linked libraries
+        if: steps.flang_boxtools.outcome == 'success'
+        working-directory: chombo/lib
+        run: |
+          # Only the nine libraries in CHOMBO_LINK_ORDER. AMRTimeDependent is
+          # deliberately absent: the solver never links it, and it is where the
+          # sigaction/Ctrl-C code lives.
+          for lib in BoxTools AMRTools AMRElliptic EBTools EBAMRTools EBAMRElliptic Workshop MFTools; do
+            echo "::group::$lib"
+            make -j"$(nproc)" "$lib" \
+              DIM=2 USE_EB=TRUE USE_MF=TRUE USE_HDF=FALSE USE_64=TRUE \
+              MPI=FALSE DEBUG=FALSE OPT=TRUE \
+              CXX=g++-13 \
+              FC="flang-${LLVM_FOUND}" \
+              PERL=perl \
+              CSHELLCMD="bash -o pipefail -c" \
+              CH_CPP="clang-${LLVM_FOUND} -E -P -C" \
+              FFLAGS="-O2 -funroll-loops -ffp-contract=off" \
+              || echo "::error::$lib failed under flang"
+            echo "::endgroup::"
+          done
+
+      - name: Verdict
+        run: |
+          if [ "${{ steps.flang_boxtools.outcome }}" = "success" ]; then
+            echo "::notice::flang compiled ChomboFortran's generated output -- the clang-cl/flang route is viable"
+          else
+            echo "::error::flang rejected ChomboFortran's generated output on Linux; read the failure before investing in a lib/mk compiler block"
+            exit 1
+          fi
+
+  windows-toolchain:
+    name: clang-cl/flang toolchain sanity (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up MSYS2 for make, perl and a shell with pipefail
+        # ChomboFortran is perl and Chombo's rules need GNU make regardless of
+        # who compiles, so MSYS2 stays in the build even on the clang-cl route.
+        # It is demoted from compiler to build tool -- no MinGW gcc is installed.
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            make
+            perl
+            diffutils
+
+      - name: Install LLVM (clang, clang-cl, flang)
+        shell: powershell
+        run: |
+          choco upgrade llvm -y
+          $llvm = "C:\Program Files\LLVM\bin"
+          $llvm | Set-Content -Path $env:GITHUB_PATH
+          & "$llvm\clang.exe" --version
+          & "$llvm\clang-cl.exe" --version
+          & "$llvm\flang.exe" --version
+
+      - name: Can flang compile fixed-form Fortran here?
+        shell: msys2 {0}
+        run: |
+          # The simplest possible version of the real question, just to confirm
+          # the compiler works on this runner before anything depends on it.
+          cat > /tmp/fixed.f <<'EOF'
+                subroutine addone(x)
+                double precision x
+                x = x + 1.0d0
+                return
+                end
+          EOF
+          "/c/Program Files/LLVM/bin/flang.exe" -c -O2 -ffp-contract=off /tmp/fixed.f -o /tmp/fixed.o
+          ls -la /tmp/fixed.o
+
+      - name: Does Chombo recognise this system, and do the perl tools run?
+        shell: msys2 {0}
+        run: |
+          # Same check the earlier MinGW probe made, and still needed: an
+          # unrecognised uname is not diagnosed by Chombo, it falls through to an
+          # "Older Crays" branch that sets CXX=CC and ranlib=touch.
+          printf 'system := $(filter AIX Linux CYGWIN%% MINGW%% MSYS%% Darwin,$(shell uname))\n' > /tmp/sys.mk
+          printf 'system := $(patsubst MINGW%%,CYGWIN,$(system))\n' >> /tmp/sys.mk
+          printf 'check:\n' >> /tmp/sys.mk
+          printf '\t@test -n "$(system)" || { echo "uname=$(shell uname) unrecognised"; exit 1; }\n' >> /tmp/sys.mk
+          printf '\t@echo "  uname $(shell uname) resolves to Chombo system=$(system)"\n' >> /tmp/sys.mk
+          make -f /tmp/sys.mk check
+          make --version | head -1
+          perl --version | sed -n 2p
+          # The three perl passes the ChomboFortran pipeline depends on.
+          perl -I chombo/lib/util/chfpp chombo/lib/util/chfpp/uber.pl --help 2>&1 | head -3 || true
+          ls chombo/lib/util/chfpp/uber.pl chombo/lib/util/chfpp/stripsharpmain.pl chombo/lib/util/chfpp/fort72
