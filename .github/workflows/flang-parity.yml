@@ -29,8 +29,14 @@ name: flang parity (Linux)
 #     Loosening it to get a pass would defeat the point; tests/README.md already
 #     says a failing regression test is a question, not a chore.
 #
-# The control for this job is the `Linux x86_64 (GCC 13)` job in ci.yml, which
-# runs the same tests on the same runner image with gfortran.
+# The `control` job below is the same build with gfortran, on the same runner
+# image. It duplicates ci.yml's Linux job on purpose: ci.yml runs on pushes to
+# main and on pull requests, so a branch doing surgery on the shared Chombo
+# build path has nothing watching the GCC side until a PR exists. Changes to
+# cmake/BuildChomboLibs.cmake and to chombo/lib/src affect every platform, and
+# finding that out from the control here is cheaper than from a PR.
+#
+# macOS still is not covered by this workflow. That needs a pull request.
 
 on:
   push:
@@ -180,3 +186,71 @@ jobs:
             ./build/bin/compare_solution --check "$final" "$base" 0 0 || true
             echo "::endgroup::"
           done
+
+  control:
+    name: The same build with gfortran (control)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+
+    steps:
+      - name: Check out repository and submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gfortran
+
+      - name: Install Conan
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install 'conan>=2.0'
+
+      - name: Install dependencies with Conan
+        run: |
+          CC=gcc CXX=g++ FC=gfortran conan install . --build=missing \
+            -pr:a=conan-profiles/CI-CD/Linux-AMD64_profile.txt
+
+      - name: Configure
+        run: |
+          source build/generators/conanbuild.sh
+          CC=gcc CXX=g++ FC=gfortran cmake -B build -S . -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/build/generators/conan_toolchain.cmake" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOPTION_TARGET_MESSAGING=ON
+
+      - name: Build
+        run: |
+          source build/generators/conanbuild.sh
+          cmake --build build
+
+      - name: Test
+        run: |
+          source build/generators/conanbuild.sh
+          ctest --test-dir build --output-on-failure
+
+      - name: Confirm the narrowed target list did not quietly skip a library
+        run: |
+          # `lib` used to build everything under chombo/lib/src; this now names
+          # only CHOMBO_LINK_ORDER. If a library the solver links were missing
+          # from that list the build would fail at link, but a library that is
+          # built and NOT linked would just waste time silently -- so check both
+          # directions against what actually landed.
+          for d in 2 3; do
+            echo "::group::${d}D archives"
+            ls -1 build/chombo/${d}d/lib/
+            n=$(ls -1 build/chombo/${d}d/lib/*.a | wc -l | tr -d ' ')
+            echo "  $n archives"
+            if [ "$n" != "9" ]; then
+              echo "::error::expected 9 archives for ${d}D, found $n"
+              exit 1
+            fi
+            echo "::endgroup::"
+          done
+          if ls chombo/lib/libamrtimedependent*.a >/dev/null 2>&1; then
+            echo "::error::AMRTimeDependent was built; the target list is not actually narrowed"
+            exit 1
+          fi
+          echo "::notice::9 archives per dimension, and AMRTimeDependent was not built"

@@ -15,8 +15,13 @@
 #include <cstdio>
 #include <cstring>
 #include "SPMD.H"
+// Neither header exists in the MSVC runtime, which is what clang-cl compiles
+// against on Windows. Nothing below reaches for them there -- see
+// getMemoryUsageSize.
+#ifndef _WIN32
 #include <sys/time.h>
 #include <sys/resource.h>
+#endif
 #ifdef CH_MPI
 #include <mpi.h>
 #endif
@@ -166,6 +171,14 @@ void getMemoryUsageSize(unsigned int& residentSetSize, unsigned int& size)
     }
   fclose(f);
 #endif
+
+#elif defined(_WIN32)
+  // Windows has no getrusage. GetProcessMemoryInfo would report the same
+  // figure, but that means windows.h and psapi in a file that needs neither,
+  // to populate a diagnostic which only ever reaches Chombo's own
+  // memory-tracking printout -- and CH_USE_MEMORY_TRACKING output is not
+  // something VCell reads. Both values stay at the zero they were initialised
+  // to, which is honest rather than wrong.
 
 #else
   static struct rusage rus;

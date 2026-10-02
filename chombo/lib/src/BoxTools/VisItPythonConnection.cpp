@@ -10,19 +10,35 @@
 
 #include "VisItPythonConnection.H"
 
-#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
+#include <fcntl.h>
 #include <unistd.h>
 #include <signal.h>
 #include <sys/wait.h>
 #include <sys/types.h>
 #include <sys/select.h>
 #include <sys/time.h>
+#endif
 
 
 #include "NamespaceHeader.H"
+
+// This class launches VisIt's Python CLI as a child process and talks to it
+// over a pipe pair -- fork(), execvp(), pipe(), select() and waitpid(). None of
+// that exists on Windows, and there is no reason to port it: VCell's solver
+// never opens a VisIt connection, and this file is only here because Chombo's
+// build compiles every .cpp in the directory.
+//
+// So on Windows the implementation is replaced by stubs that report failure
+// rather than being left undefined. Undefined would in fact link today, since
+// nothing references VisItChomboDriver and the linker would never pull its
+// object out of the archive -- but that is luck, not a design, and it would
+// turn into a baffling set of undefined symbols the first time someone touched
+// it.
+#ifndef _WIN32
 
 // ****************************************************************************
 //  Constructor:  VisItPythonConnection::VisItPythonConnection
@@ -371,5 +387,55 @@ bool VisItPythonConnection::IsOpen()
 {
     return (visitpid > 0);
 }
+
+#else // _WIN32
+
+VisItPythonConnection::VisItPythonConnection()
+  : to_cli(-1), from_cli(-1), readbufferlen(0), readbuffer(NULL), visitpid(-1),
+    error("VisIt connections are not supported on Windows")
+{
+}
+
+VisItPythonConnection::~VisItPythonConnection()
+{
+}
+
+bool VisItPythonConnection::Open(std::vector<std::string>)
+{
+    error = "VisIt connections are not supported on Windows";
+    return false;
+}
+
+bool VisItPythonConnection::Close()
+{
+    return false;
+}
+
+bool VisItPythonConnection::SendCommand(const char *)
+{
+    return false;
+}
+
+bool VisItPythonConnection::IsOpen()
+{
+    return false;
+}
+
+std::string VisItPythonConnection::GetLastError()
+{
+    return error;
+}
+
+bool VisItPythonConnection::WriteString(const char *)
+{
+    return false;
+}
+
+bool VisItPythonConnection::WaitForPrompt()
+{
+    return false;
+}
+
+#endif // _WIN32
 
 #include "NamespaceFooter.H"

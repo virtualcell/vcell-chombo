@@ -217,10 +217,10 @@ function(add_chombo_dimension DIM)
 		set(_use64 FALSE)
 	endif ()
 
-	add_custom_command(
-			OUTPUT ${_libs} ${_stamp}
-			COMMENT "Building Chombo ${DIM}D libraries (this takes a few minutes)"
-			COMMAND ${CHOMBO_MAKE_PROGRAM} -j${CHOMBO_BUILD_JOBS} lib
+	# Hoisted into a list because two make invocations need the same set. Every
+	# one of these is a command-line override, which beats anything a makefile
+	# sets -- the reason this build needs no generated mk/Make.defs.local.
+	set(_make_vars
 			# --- what gets built ---
 			DIM=${DIM}
 			USE_EB=TRUE          # embedded boundary code -- the whole point for VCell
@@ -251,7 +251,7 @@ function(add_chombo_dimension DIM)
 			#
 			# pipefail has been in bash since 3.0, so even the 3.2 that macOS still
 			# ships is fine.
-			CSHELLCMD=${CHOMBO_BASH_PROGRAM}\ -o\ pipefail\ -c
+			"CSHELLCMD=${CHOMBO_BASH_PROGRAM} -o pipefail -c"
 			# The C preprocessor Chombo runs over ChomboFortran's output. Set
 			# explicitly because the Darwin block in lib/mk/Make.defs forces
 			# CH_CPP=/usr/bin/cpp -E, working around g77 not supporting -E; g77 is
@@ -267,8 +267,8 @@ function(add_chombo_dimension DIM)
 			# comments, without which the preprocessor eats Fortran's // operator.
 			"CH_CPP=${_ch_cpp}"
 			# --- HDF5 ---
-			HDFINCFLAGS=${_hdf_inc_flags}
-			HDFLIBFLAGS=${_hdf_lib_flags}
+			"HDFINCFLAGS=${_hdf_inc_flags}"
+			"HDFLIBFLAGS=${_hdf_lib_flags}"
 			# Deliberately NOT setting fcppflags=-cpp here, which VCell's old
 			# Make.defs.local.linux did and which was carried over for parity.
 			# fcppflags is appended to $(CH_CPP), the C preprocessor run over
@@ -283,6 +283,41 @@ function(add_chombo_dimension DIM)
 			# .cpre came out empty, then the .f, then an object file with no
 			# symbols, and the build only fell over at link with undefined Fortran
 			# references far from the cause.
+			#
+			# Chombo is far older than C++20 and does not need it. Pinned rather than
+			# left to the compiler's default, which is what it has been relying on:
+			# GCC 13 and clang 21 both default to gnu++17, so this changes nothing
+			# today. A compiler whose default moves to C++20 would silently change
+			# what these archives are compiled as, and that is not hypothetical --
+			# MSYS2's GCC 16 does exactly that, and `using namespace std;` at global
+			# scope in CH_Timer.H and Tuple.H then collides Chombo's own integral()
+			# with the std::integral concept.
+			#
+			# This holds the archives at the standard they are already built with
+			# everywhere, rather than letting any platform become the first to compile
+			# Chombo as C++20. The solver's own translation units stay C++20, which
+			# the submodules require; that split is the status quo, not a new one.
+			XTRACXXFLAGS=-std=gnu++17)
+
+	add_custom_command(
+			OUTPUT ${_libs} ${_stamp}
+			COMMENT "Building Chombo ${DIM}D libraries (this takes a few minutes)"
+			# Only the libraries CHOMBO_LINK_ORDER names, rather than `lib`, which
+			# builds every library under chombo/lib/src. Those lowercase names are
+			# targets in chombo/lib/GNUmakefile aliasing the directories, so this one
+			# list stays the single source of truth for what is built and what is
+			# linked.
+			#
+			# It removes a class of problem rather than merely saving time.
+			# AMRTimeDependent and EBAMRTimeDependent are linked by nothing here, and
+			# AMRTimeDependent/AMR.cpp installs a Ctrl-C handler through sigaction,
+			# which Windows has no equivalent for. Not building it is a better answer
+			# than porting it.
+			COMMAND ${CHOMBO_MAKE_PROGRAM} -j${CHOMBO_BUILD_JOBS} ${CHOMBO_LINK_ORDER} ${_make_vars}
+			# `lib` ran this itself once its libraries were built. It copies each
+			# library's public headers -- the generated *_F.H among them -- into
+			# chombo/lib/include, which is what CollectChomboLibs.cmake snapshots.
+			COMMAND ${CHOMBO_MAKE_PROGRAM} include ${_make_vars}
 			WORKING_DIRECTORY "${CHOMBO_LIB_DIR}"
 			COMMAND ${CMAKE_COMMAND}
 			-DCHOMBO_LIB_DIR=${CHOMBO_LIB_DIR}

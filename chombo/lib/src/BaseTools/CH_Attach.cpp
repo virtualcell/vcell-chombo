@@ -11,7 +11,9 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring> // for memset
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #ifndef CH_DISABLE_SIGNALS
 #include <csignal>
 #endif
@@ -25,6 +27,17 @@ int pfds[2];
 
 bool alreadyAttached = false;
 using std::endl;
+
+// Everything from here to the end of AttachDebugger() is Chombo's
+// attach-a-debugger facility, built on fork(), pipe() and popen(). Windows has
+// none of them.
+//
+// Compiled out rather than reimplemented because this is dead code for VCell:
+// registerDebugger() is the only entry point, and its only callers are
+// commented out in Chombo's own tests. The stubs below keep the symbols so that
+// anything referencing them still links.
+#ifndef _WIN32
+
 void DebugCont()
 {
 // #ifndef CH_DISABLE_SIGNALS
@@ -141,6 +154,18 @@ void AttachDebugger(int a_sig)
 // when running the code inside an actual debugger, the debugger signal handler
 // will come in before this one, so the debugger should function correctly.
 
+#else  // _WIN32
+
+void DebugCont()
+{
+}
+
+void AttachDebugger(int a_sig)
+{
+}
+
+#endif // _WIN32
+
 extern bool maydayabortFlag;
 
 int registerDebugger()
@@ -148,7 +173,11 @@ int registerDebugger()
   int rtn = 0;
   maydayabortFlag = true;
 
-#ifndef CH_DISABLE_SIGNALS
+// _WIN32 joins CH_DISABLE_SIGNALS here rather than getting a branch of its own:
+// the handler it would install is the stub above, so there is nothing to
+// install, and the #else already returns the 2 that callers expect when signal
+// handling is unavailable.
+#if !defined(CH_DISABLE_SIGNALS) && !defined(_WIN32)
   signal(SIGSEGV, AttachDebugger);
   signal(SIGABRT, AttachDebugger);
 
