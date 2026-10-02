@@ -136,8 +136,24 @@ function(add_vcell_chombo_solver DIM)
 			ZLIB::ZLIB)
 
 	# Chombo is part Fortran; the C++ driver has to pull in the Fortran runtime.
+	# The Fortran objects live inside Chombo's archives rather than in this target,
+	# so CMake does not add the runtime on its own.
 	if (CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
 		target_link_libraries(${exe} PRIVATE gfortran)
+	elseif (CMAKE_Fortran_COMPILER_ID MATCHES "Flang")
+		# flang's runtime has been renamed across LLVM releases -- FortranRuntime
+		# and FortranDecimal, then flang_rt.runtime -- so take whatever CMake
+		# detected instead of naming it here.
+		#
+		# The GNU branch above deliberately keeps its explicit `gfortran` rather
+		# than doing the same: the implicit list there also carries m, quadmath and
+		# the gcc support libraries, which would change what
+		# packaging/bundle_macos.py has to resolve and what the glibc floor check in
+		# packaging/bundle-linux.sh sees.
+		target_link_directories(${exe} PRIVATE
+				${CMAKE_Fortran_IMPLICIT_LINK_DIRECTORIES})
+		target_link_libraries(${exe} PRIVATE
+				${CMAKE_Fortran_IMPLICIT_LINK_LIBRARIES})
 	endif ()
 
 	install(TARGETS ${exe} RUNTIME DESTINATION bin)

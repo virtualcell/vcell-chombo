@@ -152,8 +152,47 @@ function(add_chombo_dimension DIM)
 	# operator -- so the C comment blocks that survive (starting with gcc's
 	# implicit stdc-predef.h) are only removed on this second pass.  Chombo splits
 	# $(FC) on whitespace to recover the compiler name, so appending here is safe.
-	if (CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+	#
+	# flang needs it for the same reason but fails differently, and more quietly:
+	# gfortran rejects the surviving comments outright ("Non-numeric character in
+	# statement label"), while flang only warns and carries on. Omitting it there
+	# would leave C comment blocks in the compiled Fortran behind a warning.
+	if (CMAKE_Fortran_COMPILER_ID STREQUAL "GNU"
+			OR CMAKE_Fortran_COMPILER_ID MATCHES "Flang")
 		set(_fc_name "${_fc_name} -cpp")
+	endif ()
+
+	# The command for the C preprocessor pass over ChomboFortran's output; see the
+	# comment on CH_CPP below for why it is set explicitly at all.
+	#
+	# clang needs -x c. There is one .F file in the libraries this builds,
+	# AMRTools/CFLeastSquares.F, and Make.rules pushes it through $(CH_CPP) like
+	# any other Fortran source. clang's driver recognises .F as Fortran, cannot
+	# compile it, and delegates to gcc, which dispatches to gfortran, which
+	# refuses -E without -cpp -- so the build fails naming gcc and gfortran from a
+	# step that invokes neither. -x c says "preprocess this as text", which is the
+	# only thing this pass has ever meant. g++ handles the file directly, which is
+	# why Linux and macOS have never needed it.
+	set(_ch_cpp "${_cxx_name} -E -P -C")
+	if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+		string(APPEND _ch_cpp " -x c")
+	endif ()
+
+	# Chombo picks its flag sets by matching the basename of $(CXX) and $(FC)
+	# against names it knows -- g++, gfortran, icpc, xlf and so on. flang is not
+	# among them, and an unrecognised Fortran compiler is not diagnosed: FFLAGS
+	# falls back to Make.defs' `deffoptflags = -O`, quietly dropping the -O2 every
+	# other platform builds with. Until chombo/lib/mk/compiler has a block for
+	# LLVM, pass the Fortran flags explicitly.
+	#
+	# -ffp-contract=off is a parity flag, not a performance one. flang fuses
+	# multiply-adds by default; GCC at -O2 -m64 with no -march emits no FMA on
+	# baseline x86-64. `off` is what reproduces the numbers the regression
+	# baselines in tests/resources were generated with, and matching those is the
+	# whole point of building this way.
+	set(_chombo_extra_args "")
+	if (CMAKE_Fortran_COMPILER_ID MATCHES "Flang")
+		list(APPEND _chombo_extra_args "FFLAGS=-O2 -funroll-loops -ffp-contract=off")
 	endif ()
 
 	_chombo_hdf5_flags(_hdf_inc_flags _hdf_lib_flags)
@@ -212,7 +251,8 @@ function(add_chombo_dimension DIM)
 			# Make.defs.defaults, plus -C from Make.defs.GNU), so both platforms now
 			# take the same path. -C is essential and not cosmetic: it keeps
 			# comments, without which the preprocessor eats Fortran's // operator.
-			CH_CPP=${_cxx_name}\ -E\ -P\ -C
+			"CH_CPP=${_ch_cpp}"
+			${_chombo_extra_args}
 			# --- HDF5 ---
 			HDFINCFLAGS=${_hdf_inc_flags}
 			HDFLIBFLAGS=${_hdf_lib_flags}
