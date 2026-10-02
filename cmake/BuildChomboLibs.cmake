@@ -209,23 +209,6 @@ function(add_chombo_dimension DIM)
 		endif ()
 	endif ()
 
-	# Chombo picks its flag sets by matching the basename of $(CXX) and $(FC)
-	# against names it knows -- g++, gfortran, icpc, xlf and so on. flang is not
-	# among them, and an unrecognised Fortran compiler is not diagnosed: FFLAGS
-	# falls back to Make.defs' `deffoptflags = -O`, quietly dropping the -O2 every
-	# other platform builds with. Until chombo/lib/mk/compiler has a block for
-	# LLVM, pass the Fortran flags explicitly.
-	#
-	# -ffp-contract=off is a parity flag, not a performance one. flang fuses
-	# multiply-adds by default; GCC at -O2 -m64 with no -march emits no FMA on
-	# baseline x86-64. `off` is what reproduces the numbers the regression
-	# baselines in tests/resources were generated with, and matching those is the
-	# whole point of building this way.
-	set(_chombo_extra_args "")
-	if (CMAKE_Fortran_COMPILER_ID MATCHES "Flang")
-		list(APPEND _chombo_extra_args "FFLAGS=-O2 -funroll-loops -ffp-contract=off")
-	endif ()
-
 	_chombo_hdf5_flags(_hdf_inc_flags _hdf_lib_flags)
 
 	if (CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -283,7 +266,6 @@ function(add_chombo_dimension DIM)
 			# take the same path. -C is essential and not cosmetic: it keeps
 			# comments, without which the preprocessor eats Fortran's // operator.
 			"CH_CPP=${_ch_cpp}"
-			${_chombo_extra_args}
 			# --- HDF5 ---
 			HDFINCFLAGS=${_hdf_inc_flags}
 			HDFLIBFLAGS=${_hdf_lib_flags}
