@@ -100,24 +100,42 @@ jobs:
 
       - name: Configure with flang as the Fortran compiler
         run: |
+          # Redirected rather than piped through tee, because the guard step
+          # below reads this log and a pipeline would report tee's exit status
+          # instead of cmake's -- a configure failure would then look like a
+          # pass. That is the same trap BuildChomboLibs.cmake sets pipefail for,
+          # and it hid three macOS failures when it bit there.
           source build/generators/conanbuild.sh
           CC=gcc CXX=g++ FC="${FC_BIN}" cmake -B build -S . -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$PWD/build/generators/conan_toolchain.cmake" \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_Fortran_COMPILER="${FC_BIN}" \
-            -DOPTION_TARGET_MESSAGING=ON
+            -DOPTION_TARGET_MESSAGING=ON > /tmp/configure.log 2>&1 \
+            || { cat /tmp/configure.log; exit 1; }
+          cat /tmp/configure.log
 
       - name: Confirm the toolchain CMake actually picked
         run: |
           # Cheap insurance against the job silently testing nothing: if CMake
           # fell back to gfortran, every result below would be the control's.
-          grep -E "CMAKE_(CXX|Fortran)_COMPILER:" build/CMakeCache.txt
-          id=$(grep -E "^CMAKE_Fortran_COMPILER_ID" build/CMakeCache.txt || true)
-          echo "$id"
-          if ! grep -qiE "CMAKE_Fortran_COMPILER:FILEPATH=.*flang" build/CMakeCache.txt; then
-            echo "::error::CMake is not configured with flang; this job would prove nothing"
+          #
+          # Anchored on CMake's own compiler identification rather than on the
+          # cache. The cache entry's type is not something to rely on -- CMake
+          # records a -D with no explicit type as STRING, not FILEPATH, which is
+          # what made the first version of this check a false negative that
+          # failed a correctly configured build.
+          grep -E "^CMAKE_(CXX|Fortran)_COMPILER:[A-Z]*=" build/CMakeCache.txt
+          grep -E "compiler identification is" /tmp/configure.log || true
+
+          if ! grep -qE "The Fortran compiler identification is .*Flang" /tmp/configure.log; then
+            echo "::error::CMake did not identify the Fortran compiler as Flang; this job would prove nothing"
             exit 1
           fi
+          if ! grep -qE "The CXX compiler identification is GNU" /tmp/configure.log; then
+            echo "::error::CXX is not GNU; the point of this job is that only the Fortran half changes"
+            exit 1
+          fi
+          echo "::notice::configured with GNU C++ and Flang Fortran, as intended"
 
       - name: Build
         run: |
