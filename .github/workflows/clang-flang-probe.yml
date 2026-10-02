@@ -70,7 +70,7 @@ jobs:
       - name: Install the control toolchain (GCC 13, as the baselines were built with)
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-13 g++-13 gfortran-13 perl make
+          sudo apt-get install -y gcc-13 g++-13 gfortran-13 perl make libhdf5-dev
           make --version | head -1
 
       - name: Install clang and flang from apt.llvm.org
@@ -107,14 +107,17 @@ jobs:
           	@echo "  FC=$(FC) -> fname=$(fname)"
           	@test "$(fname)" = "flang" || { echo "::error::FC=$(FC) resolved to fname=$(fname), expected flang"; exit 1; }
           EOF
-          make -f /tmp/fname.mk check FC="flang-${LLVM_FOUND}"
+          make -f /tmp/fname.mk check FC="flang-${LLVM_FOUND} -cpp"
 
       - name: Control -- build BoxTools with GCC 13 (proves the harness)
         working-directory: chombo/lib
         run: |
           make -j"$(nproc)" BoxTools \
-            DIM=2 USE_EB=TRUE USE_MF=TRUE USE_HDF=FALSE USE_64=TRUE \
+            DIM=2 USE_EB=TRUE USE_MF=TRUE USE_64=TRUE \
             MPI=FALSE DEBUG=FALSE OPT=TRUE \
+            USE_HDF=TRUE \
+            HDFINCFLAGS="-DH5_USE_16_API -I/usr/include/hdf5/serial" \
+            HDFLIBFLAGS="-L/usr/lib/x86_64-linux-gnu/hdf5/serial -lhdf5 -lz" \
             CXX=g++-13 \
             FC="gfortran-13 -cpp" \
             PERL=perl \
@@ -141,13 +144,16 @@ jobs:
           # emits no FMA on baseline x86-64, so `off` is what reproduces the
           # numbers the stored baselines were generated with.
           make -j"$(nproc)" BoxTools \
-            DIM=2 USE_EB=TRUE USE_MF=TRUE USE_HDF=FALSE USE_64=TRUE \
+            DIM=2 USE_EB=TRUE USE_MF=TRUE USE_64=TRUE \
             MPI=FALSE DEBUG=FALSE OPT=TRUE \
+            USE_HDF=TRUE \
+            HDFINCFLAGS="-DH5_USE_16_API -I/usr/include/hdf5/serial" \
+            HDFLIBFLAGS="-L/usr/lib/x86_64-linux-gnu/hdf5/serial -lhdf5 -lz" \
             CXX=g++-13 \
-            FC="flang-${LLVM_FOUND}" \
+            FC="flang-${LLVM_FOUND} -cpp" \
             PERL=perl \
             CSHELLCMD="bash -o pipefail -c" \
-            CH_CPP="clang-${LLVM_FOUND} -E -P -C" \
+            CH_CPP="clang-${LLVM_FOUND} -E -P -C -x c" \
             FFLAGS="-O2 -funroll-loops -ffp-contract=off"
 
       - name: Signal 1 -- is clang's preprocessor output identical to g++'s?
@@ -156,8 +162,8 @@ jobs:
           # The .f files are the whole contract between the preprocessing half
           # and the compile half. If these match, every remaining question is
           # about flang itself and none is about ChomboFortran.
-          CTL=$(find . -type d -name '2d.Linux.64.g++.gfortran.OPT' -path '*/f/*' | head -1)
-          TST=$(find . -type d -name '2d.Linux.64.g++.flang.OPT'    -path '*/f/*' | head -1)
+          CTL=$(find . -type d -path '*/f/2d.Linux.64.*gfortran*' | head -1)
+          TST=$(find . -type d -path '*/f/2d.Linux.64.*flang*'    | head -1)
           echo "control: ${CTL:-<none>}"
           echo "test:    ${TST:-<none>}"
           if [ -z "$CTL" ] || [ -z "$TST" ]; then
@@ -182,13 +188,16 @@ jobs:
           for lib in BoxTools AMRTools AMRElliptic EBTools EBAMRTools EBAMRElliptic Workshop MFTools; do
             echo "::group::$lib"
             make -j"$(nproc)" "$lib" \
-              DIM=2 USE_EB=TRUE USE_MF=TRUE USE_HDF=FALSE USE_64=TRUE \
+              DIM=2 USE_EB=TRUE USE_MF=TRUE USE_64=TRUE \
               MPI=FALSE DEBUG=FALSE OPT=TRUE \
+              USE_HDF=TRUE \
+              HDFINCFLAGS="-DH5_USE_16_API -I/usr/include/hdf5/serial" \
+              HDFLIBFLAGS="-L/usr/lib/x86_64-linux-gnu/hdf5/serial -lhdf5 -lz" \
               CXX=g++-13 \
-              FC="flang-${LLVM_FOUND}" \
+              FC="flang-${LLVM_FOUND} -cpp" \
               PERL=perl \
               CSHELLCMD="bash -o pipefail -c" \
-              CH_CPP="clang-${LLVM_FOUND} -E -P -C" \
+              CH_CPP="clang-${LLVM_FOUND} -E -P -C -x c" \
               FFLAGS="-O2 -funroll-loops -ffp-contract=off" \
               || echo "::error::$lib failed under flang"
             echo "::endgroup::"
