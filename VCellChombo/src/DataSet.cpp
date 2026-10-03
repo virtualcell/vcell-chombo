@@ -289,8 +289,8 @@ void DataSet::writeMembraneSolution(SimulationExpression* sim, hid_t h5SimFile)
 		dim[0] = totalNumMembranePoints;
 		hsize_t fileSpace = H5Screate_simple(rank, dim, NULL);
 		// select offset in file space
-		hsize_t start[] = {memIndexOffset};
-		hsize_t count[] = {var->getSize()};
+		hsize_t start[] = {static_cast<hsize_t>(memIndexOffset)};
+		hsize_t count[] = {static_cast<hsize_t>(var->getSize())};
 		herr_t err = H5Sselect_hyperslab(fileSpace, H5S_SELECT_SET, start, NULL, count, NULL);
 		if (err < 0)
 		{
@@ -367,8 +367,8 @@ void DataSet::writeExtrapolatedValues(SimulationExpression* sim, hid_t h5SimFile
 		dim[0] = totalNumMembranePoints;
 		hsize_t fileSpace = H5Screate_simple(rank, dim, NULL);
 		// select offset in file space
-		hsize_t start[] = {memIndexOffset};
-		hsize_t count[] = {numMembranePoints};
+		hsize_t start[] = {static_cast<hsize_t>(memIndexOffset)};
+		hsize_t count[] = {static_cast<hsize_t>(numMembranePoints)};
 		herr_t err = H5Sselect_hyperslab(fileSpace, H5S_SELECT_SET, start, NULL, count, NULL);
 		if (err < 0)
 		{
