@@ -203,7 +203,6 @@ jobs:
             -DCHOMBO_MAKE_PROGRAM="$env:CHOMBO_MAKE" `
             -DCHOMBO_PERL_PROGRAM="$env:CHOMBO_PERL" `
             -DCHOMBO_BASH_PROGRAM="$env:CHOMBO_BASH" `
-            -DCHOMBO_UNIX_TOOLS_DIR="$env:MSYS2_USR_BIN" `
             -DOPTION_TARGET_MESSAGING=OFF
 
       - name: Confirm the toolchain CMake actually picked
@@ -221,9 +220,34 @@ jobs:
             Write-Host "::error::C++ compiler is not clang-cl"; exit 1
           }
 
+      - name: Disarm MSYS2's link.exe
+        shell: pwsh
+        run: |
+          # The build step below puts MSYS2's usr/bin on PATH, because Chombo's
+          # makefiles call find, chmod, cp, sort and uniq bare and expect GNU
+          # semantics -- System32's find.exe is a text search tool and the
+          # include target dies on it.
+          #
+          # That directory also holds a coreutils link.exe, and having it ahead
+          # of MSVC's linker on PATH is the one genuine hazard in doing this.
+          # Renaming it is blunt but completely effective, and nothing in this
+          # build wants GNU link: it makes a hard link, which no part of Chombo
+          # or CMake invokes.
+          $l = "$env:MSYS2_USR_BIN/link.exe"
+          if (Test-Path $l) { Move-Item $l "$l.disabled" -Force; Write-Host "  renamed $l" }
+          else { Write-Host "::warning::no link.exe at $l -- check this is still needed" }
+
       - name: Build
         shell: pwsh
-        run: cmake --build build
+        run: |
+          # MSYS2 ahead of PATH for this step only. Earlier attempts passed the
+          # tools to CMake by absolute path, which works for make, perl and bash
+          # but not for the find/chmod/cp/sort that Chombo's recipes call bare;
+          # and prepending through `cmake -E env` failed because ninja wraps a
+          # long custom command in a .bat and the Windows PATH contains
+          # "Program Files (x86)", whose parentheses cmd.exe mis-parses.
+          $env:PATH = "$env:MSYS2_USR_BIN;$env:PATH"
+          cmake --build build
 
       - name: Test
         shell: pwsh
