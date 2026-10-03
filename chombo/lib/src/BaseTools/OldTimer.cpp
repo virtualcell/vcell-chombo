@@ -14,6 +14,12 @@
 static char stuff[1024];
 #endif
 
+#ifdef _WIN32
+// For the std::chrono clock in getTimeStampWC below. Here rather than in
+// OldTimer.H, where the equivalent include would land inside that header's
+// extern "C" block.  <vcell>
+#include <chrono>
+#endif
 #include "OldTimer.H"
 
 char dummFlag[4];
