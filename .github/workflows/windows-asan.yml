@@ -32,15 +32,16 @@ name: Windows ASan
 # Fortran is not instrumented. flang's ASan support is less travelled, and the
 # allocations here are all made from the C++ side.
 
-# Triggered on pushes to the bring-up branch as well as by hand. Dispatch alone
-# would be preferable -- this duplicates every expensive step of windows.yml --
-# but GitHub resolves workflow_dispatch against the default branch, so a
-# dispatch-only workflow that exists only on a feature branch cannot be run at
-# all. Once the Windows work merges, the push trigger can go.
+# Dispatch only. It duplicates every expensive step of windows.yml, so running
+# it on push would double the runner time per commit to answer a question that
+# is asked occasionally.
+#
+# It carried a push trigger during the bring-up, because GitHub resolves
+# workflow_dispatch against the default branch and a dispatch-only workflow
+# living on a feature branch cannot be triggered at all. Once this is on main
+# that stops being a problem.
 on:
   workflow_dispatch:
-  push:
-    branches: [ windows/clang-cl-build ]
 
 concurrency:
   group: windows-asan-${{ github.ref }}
