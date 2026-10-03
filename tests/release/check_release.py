@@ -167,7 +167,15 @@ def base_name(text: str) -> str:
 def run_case(case: Case, args: argparse.Namespace, broker: FakeBroker | None, sim_key: int) -> Result:
     res = Result(case)
     exe = f"VCellChombo{case.dim}D_x64"
-    exe_cmd = str(Path(args.bin_dir) / exe) if args.bin_dir else exe
+    if args.bin_dir:
+        path = Path(args.bin_dir) / exe
+        # A Windows archive carries the .exe suffix. The --runner path never
+        # does: there the name is resolved inside a Linux container.
+        if not path.exists() and path.with_suffix(".exe").exists():
+            path = path.with_suffix(".exe")
+        exe_cmd = str(path)
+    else:
+        exe_cmd = exe
     runner = shlex.split(args.runner) if args.runner else []
 
     if case.kind == "usage":
