@@ -113,12 +113,32 @@ function(add_vcell_chombo_solver DIM)
 			CH_USE_DOUBLE
 			CH_USE_HDF5
 			CH_USE_SETVAL
+			# Not optional, and not Linux-only. Chombo's own build leaves USE_MT at its
+			# default of TRUE -- BuildChomboLibs.cmake never passes USE_MT=FALSE -- so
+			# every Chombo archive is compiled with memory tracking on every platform.
+			# This macro adds `long bytes`, `long peak` and `char name_[120]` to class
+			# Arena, taking it from 8 bytes to 144.
+			#
+			# It used to be set only under if (LINUX), which made the other platforms
+			# an ODR violation of exactly the kind the comment above warns about:
+			# BaseFab<T>::define is a header template, so `new BArena(...)` is compiled
+			# in the solver's translation unit and allocated at the 8-byte size, while
+			# the Arena constructor it calls lives in Chombo's archive and writes the
+			# 144-byte layout. AddressSanitizer on Windows reported it exactly:
+			#
+			#   WRITE of size 4 at 0 bytes after 8-byte region
+			#   #0 BArena::BArena(char const *)
+			#   #1 BaseFab<int *>::define BaseFabImplem.H:542
+			#
+			# macOS had the same mismatch and did not crash, which is worse rather than
+			# better: every solver-side BArena under-allocated by 136 bytes and the
+			# constructor wrote over whatever followed it.
+			CH_USE_MEMORY_TRACKING
 			H5_USE_16_API)
 
 	if (LINUX)
-		target_compile_definitions(${exe} PRIVATE CH_Linux CH_USE_MEMORY_TRACKING)
+		target_compile_definitions(${exe} PRIVATE CH_Linux)
 	elseif (APPLE)
-		# Chombo's memory tracking uses mallinfo(), which macOS does not have.
 		target_compile_definitions(${exe} PRIVATE CH_Darwin)
 	elseif (WIN32)
 		# Chombo's own build defines this -- $(system) resolves to CYGWIN on
