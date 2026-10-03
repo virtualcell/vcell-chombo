@@ -54,20 +54,30 @@ jobs:
       - name: Install LLVM (clang-cl, clang, flang)
         shell: pwsh
         run: |
-          # Pinned, not `choco upgrade llvm`, which takes whatever is latest --
-          # it installed LLVM 22 on the first attempt and the toolchain check
-          # below caught the mismatch against the profile.
+          # Pinned rather than `choco upgrade llvm`, which takes whatever is
+          # latest. Unpinned is how vcell-fvsolver does it, and the consequence
+          # is worth knowing: its profile says compiler.version=21 while choco
+          # now installs 22, and Conan never checks a compiler.version setting
+          # against the compiler it actually runs -- it only hashes it into
+          # package IDs. So that mismatch builds green while labelling the
+          # binaries for a compiler that did not build them. The explicit check
+          # below is what makes this repo notice.
           #
-          # 21.1.8 specifically, because that is the flang the parity run used:
-          # the claim that flang reproduces the stored regression baselines bit
-          # for bit was measured with flang-21 (21.1.8) from apt.llvm.org, and
-          # pinning here keeps the compiler the Windows binaries are built with
-          # the same one that claim covers. Bumping this should mean re-running
-          # the flang parity workflow, not just the version number.
+          # 22.1.8 and not 21.1.8, which was tried first for a good reason and
+          # does not work: flang is absent from LLVM 21's official Windows
+          # installer. 21.1.8 installs cleanly and has no flang.exe at all
+          # (LLVM-21.1.8-win64.exe is 357 MB against 22.1.8's 434 MB, which is
+          # about the difference a Fortran compiler makes). Windows flang starts
+          # at 22, so the version is forced rather than chosen.
+          #
+          # That moved the Fortran compiler out from under the parity evidence,
+          # which was measured on flang 21. Per the rule in the error message
+          # below, flang-parity.yml moved to 22 in the same commit rather than
+          # leaving the claim describing a compiler nothing uses.
           #
           # --allow-downgrade because the runner image ships a newer LLVM
           # already; without it choco declines to go backwards.
-          choco install llvm --version=21.1.8 -y --no-progress --allow-downgrade
+          choco install llvm --version=22.1.8 -y --no-progress --allow-downgrade
           $llvm = "C:\Program Files\LLVM\bin"
           if (-not (Test-Path "$llvm\flang.exe")) { throw "flang.exe not in $llvm" }
           Add-Content -Path $env:GITHUB_PATH -Value $llvm

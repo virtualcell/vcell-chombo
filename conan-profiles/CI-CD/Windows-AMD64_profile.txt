@@ -24,7 +24,14 @@
 arch=x86_64
 build_type=Release
 compiler=clang
-compiler.version=21
+# 22 rather than fvsolver's 21, and forced rather than preferred: flang is not
+# in LLVM 21's official Windows installer at all. Windows flang starts at 22.
+#
+# This has to match the LLVM the workflow installs. Conan will not catch a
+# mismatch -- it never compares this against the compiler it runs, it only
+# hashes it into package IDs -- so .github/workflows/windows.yml checks it
+# explicitly, and the two have to move together.
+compiler.version=22
 # vcell-expressionparser and vcell-messaging use std::format, so conanfile.py's
 # check_min_cppstd rejects anything below 20. fvsolver's profile says 17 because
 # fvsolver has no such submodule requirement.
