@@ -34,7 +34,13 @@ extern "C"
 {
   // these are for gettimeofday() wall-clock timing
 #include <unistd.h>
+// No <sys/time.h> in the MSVC runtime, which is what clang-cl compiles against
+// on Windows. <chrono> gives the same wall clock without it.  <vcell>
+#ifdef _WIN32
+#include <chrono>
+#else
 #include <sys/time.h>
+#endif
 
   // obviously, if you don't have PAPI installed on your system
   // (which requires kernel modification) then the counters wont
@@ -178,7 +184,7 @@ class OldTimer
     double m_accumulated_WCtime, m_last_WCtime_stamp;
 
     // wall-clock timer data
-#ifndef CH_MPI
+#if !defined(CH_MPI) && !defined(_WIN32)
     struct timeval tv;   //  Values from call to gettimeofday
     struct timezone tz;
 #endif
