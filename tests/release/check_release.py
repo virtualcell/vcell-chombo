@@ -130,12 +130,26 @@ class Result:
 
 def cases() -> list[Case]:
     out = []
-    # A directory name that pushes the absolute base path past 256 characters.
+    # A directory name that pushes the absolute base path past 256 characters,
+    # which is what overran the old 128-byte buffers.
     deep = "a-directory-name-long-enough-to-overrun-a-128-byte-path-buffer-" * 2
+    # One component rather than two on Windows. Two of these is 253 characters,
+    # which with any work root puts the absolute path past MAX_PATH -- 260 --
+    # and the Win32 file APIs then cannot open it at all:
+    #
+    #   Solver input file fvinput doesn't exist: D:\a\_temp\check\smoke2d\...
+    #
+    # That is the platform, not the solver. Long paths there need a
+    # longPathAware manifest *and* a system-wide registry opt-in, so nothing the
+    # solver ships can guarantee them. The case keeps its point: one component
+    # is 126 characters and the absolute path it produces is about 167, still
+    # well past the 128-byte buffers this exists to exercise. It is the 256
+    # figure that Windows cannot reach, not the 128 one.
+    deep_subdir = f"{deep}/{deep}" if os.name != "nt" else deep
     for d in (2, 3):
         out += [
             Case(f"usage{d}d", d, "usage", None),
-            Case(f"smoke{d}d", d, "smoke", f"smoke{d}d.fvinput", 3, subdir=f"{deep}/{deep}"),
+            Case(f"smoke{d}d", d, "smoke", f"smoke{d}d.fvinput", 3, subdir=deep_subdir),
             Case(f"regress{d}d", d, "regression", f"regress{d}d.fvinput", 5),
             Case(f"analytic{d}d", d, "analytic", f"analytic{d}d.fvinput", 3),
             Case(f"reference{d}d", d, "reference", f"reference{d}d.fvinput", 5),
