@@ -54,7 +54,20 @@ jobs:
       - name: Install LLVM (clang-cl, clang, flang)
         shell: pwsh
         run: |
-          choco upgrade llvm -y --no-progress
+          # Pinned, not `choco upgrade llvm`, which takes whatever is latest --
+          # it installed LLVM 22 on the first attempt and the toolchain check
+          # below caught the mismatch against the profile.
+          #
+          # 21.1.8 specifically, because that is the flang the parity run used:
+          # the claim that flang reproduces the stored regression baselines bit
+          # for bit was measured with flang-21 (21.1.8) from apt.llvm.org, and
+          # pinning here keeps the compiler the Windows binaries are built with
+          # the same one that claim covers. Bumping this should mean re-running
+          # the flang parity workflow, not just the version number.
+          #
+          # --allow-downgrade because the runner image ships a newer LLVM
+          # already; without it choco declines to go backwards.
+          choco install llvm --version=21.1.8 -y --no-progress --allow-downgrade
           $llvm = "C:\Program Files\LLVM\bin"
           if (-not (Test-Path "$llvm\flang.exe")) { throw "flang.exe not in $llvm" }
           Add-Content -Path $env:GITHUB_PATH -Value $llvm
@@ -96,7 +109,7 @@ jobs:
           $actual = (& clang-cl --version | Select-String -Pattern 'version (\d+)').Matches[0].Groups[1].Value
           Write-Host "  clang-cl: $actual  (profile expects $expected)"
           if ($actual -ne $expected) {
-            Write-Host "::error::clang-cl is version $actual but Windows-AMD64_profile.txt pins compiler.version=$expected"
+            Write-Host "::error::clang-cl is version $actual but Windows-AMD64_profile.txt pins compiler.version=$expected. The LLVM version is pinned in the install step above; change both together, and re-run the flang parity workflow if the Fortran compiler moved."
             exit 1
           }
           # Chombo needs GNU make 4+, and BuildChomboLibs.cmake refuses older.
