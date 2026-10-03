@@ -126,69 +126,63 @@ it is checked. `.github/workflows/release.yml` builds it. Things that bite:
 - `tests/release/check_release.py` is the release-level test. ctest is the
   build-level one. Keep the two in step when you add an input.
 
+## The Windows build
+
+clang-cl and flang, not MSVC and not MinGW: MSVC has no Fortran compiler, and
+MinGW is ruled out by CPython's MSVC/UCRT ABI for the eventual pybind11 wheel.
+`conan-profiles/CI-CD/Windows-AMD64_profile.txt` and `SOLVER-RELEASE.md` carry
+the rest. Messaging is off; the archive needs no bundler, because everything is
+statically linked and `packaging/check-windows.ps1` fails the build if that
+stops being true.
+
+MSYS2 is part of the build and is not a leftover of the abandoned MinGW
+attempt. ChomboFortran is perl and `chombo/lib/mk` needs GNU make and a shell
+with `pipefail` whoever compiles, so MSYS2 supplies those as build tools while
+nothing it ships compiles anything. Its `usr/bin` goes on `PATH` for the build
+step only, because Chombo's recipes call `find`, `chmod`, `cp`, `sort` and
+`uniq` bare and expect GNU semantics — and because that same directory holds a
+coreutils `link.exe` which would shadow MSVC's linker, so `windows.yml` renames
+it first.
+
+Things specific to this toolchain that cost a round each to find:
+
+- **`CH_CPP` needs `-x c` under clang.** There is one `.F` file,
+  `AMRTools/CFLeastSquares.F`, and `Make.rules:443` pushes it through
+  `$(CH_CPP)`. clang's driver recognises `.F` as Fortran, cannot compile it, and
+  delegates to `gcc`, which dispatches to gfortran, which refuses `-E` without
+  `-cpp` — so the error names two compilers the failing step never invoked.
+- **flang cannot be paired with GCC as that preprocessor.** `g++` implicitly
+  includes `stdc-predef.h`, the mandatory `-C` keeps its comments in the
+  generated `.f`, and the apostrophe in `glibc's intent ...` reads to flang's
+  scanner as an unclosed character literal. gfortran survives only because its
+  own `-cpp` pass strips C comments; flang's does not. Configuring that pairing
+  is a `FATAL_ERROR` naming the cause.
+- **clang-cl ignores GNU-style flags rather than rejecting them.**
+  `-std=gnu++17` and `-funroll-loops` produced "unknown argument ignored" and
+  did nothing, so the standard pin was silently inert.
+  `BuildChomboLibs.cmake` picks the spelling from
+  `CMAKE_CXX_COMPILER_FRONTEND_VARIANT`.
+- **MSVC's STL honours removals libstdc++ does not.** `std::ptr_fun` and
+  `std::bind2nd` in `BaseTools/IndexTMI.H` were removed in C++17; libstdc++
+  keeps them, MSVC gates them behind `_HAS_AUTO_PTR_ETC`. That is a reprieve,
+  not a fix.
+- **`CH_USE_MEMORY_TRACKING` has to follow Chombo per platform.** `USE_MT?=TRUE`
+  is the default and Chombo's own `Darwin` block overrides it to `FALSE`, so the
+  libraries carry tracking everywhere except macOS. Windows resolves `$(system)`
+  to `CYGWIN`, which gets no override. Getting this wrong is an ODR violation
+  that links cleanly: the macro takes `class Arena` from 8 bytes to 144, and
+  `BaseFab<T>::define` is a header template, so `new BArena(...)` is sized in
+  whichever translation unit instantiates it.
+
+`.github/workflows/windows-asan.yml` is a dispatch-only AddressSanitizer build.
+It is what found that ODR violation, and its header records the five
+non-obvious things about clang-cl's ASan on Windows that getting it to run cost.
+
 ## What is missing
 
 - **MPI.** `OPTION_TARGET_PARALLEL` carries the old plumbing and warns at
   configure time. It is untested, and the release is serial only.
-- **Windows.** No build yet; `conanfile.py` still rejects it. Two attempts are
-  on record. Both were done on throwaway branches; the findings live here
-  rather than on them.
-
-  *MinGW-w64* (`windows-ci`, Aug 2026) built the entire Conan dependency tree
-  and then hit **four** independent failures, not the single `AMRTools` one
-  this file used to claim:
-
-  - `j1()` is absent from mingw-w64's `<math.h>` (it is POSIX XSI). MSVC
-    declares it as a deprecated alias for `_j1`, which is why
-    `vcell-stochastic` builds the same `vcell-expressionparser` commit on
-    Windows without a fix — the gap is MinGW's, not Windows'.
-  - `sigaction` in `AMRTimeDependent/AMR.cpp` — a library `CHOMBO_LINK_ORDER`
-    never links, but `make lib` builds anyway.
-  - `fork`/`pipe` in `BaseTools/CH_Attach.cpp`, dead code whose only callers
-    are commented out in Chombo's own tests.
-    `BoxTools/VisItPythonConnection.cpp` and `BaseTools/memusage.cpp` are the
-    same shape.
-  - `std::integral` colliding with Chombo's `integral()` in
-    `AMRTools/NodeIntegrals.cpp`, because `CH_Timer.H` and `Tuple.H` do
-    `using namespace std;` at global scope and MSYS2's GCC 16 defaults to
-    C++20 or later. Not a Windows problem at all — pin Chombo's own build to
-    `-std=gnu++17` and it matches what GCC 13 already gives Linux and macOS.
-
-  *clang-cl/flang* (`probe/clang-flang`, Oct 2026) follows `vcell-fvsolver`,
-  which builds 167 fixed-form `.f` files plus a pybind11 wheel that way. A
-  Linux probe holding `CXX=g++-13` constant and swapping only the Fortran half
-  showed flang compiles ChomboFortran's generated output: 41 files, all nine
-  linked libraries, zero Fortran errors. `clang -E -P -C` output is
-  byte-identical to `g++ -E -P -C`'s apart from the 33-line `stdc-predef.h`
-  comment block GCC implicitly includes and clang does not. Two things that
-  route needs:
-
-  - `-x c` on `CH_CPP`. There is one `.F` file, `AMRTools/CFLeastSquares.F`,
-    and `Make.rules:443` pushes it through `$(CH_CPP)`. clang's driver
-    recognises `.F` as Fortran, cannot compile it, and delegates to `gcc`,
-    which dispatches to gfortran, which refuses `-E` without `-cpp` — so the
-    error names gcc from a step that never mentions it. `-x c` says
-    "preprocess this as text", which is all the pipeline ever meant.
-  - ChomboFortran emitted its `subroutine` line with one leading space, putting
-    the `s` in column 2 — inside fixed form's 1–5 label field. gfortran accepts
-    that silently and flang 21 only warned, but **flang 22 rejects it outright**
-    (`Character in fixed-form label field must be a digit`, with no warning
-    group to suppress), and Windows flang starts at 22. `fort72` now pads such
-    lines to column 7. It pads only a first non-blank in columns 1–5 that is
-    not a digit: a numeric label belongs in that field, and **column 6 is the
-    continuation marker** — Chombo's hand-written `.ChF` uses `$` there as well
-    as the `     &` fort72 emits, and a rule reaching column 6 silently turns a
-    continuation into a new statement. Measured before and after across 40
-    generated files: exactly one line changes per file, and the regression
-    baselines still match bit for bit.
-  - flang cannot be paired with GCC as the ChomboFortran preprocessor, and this
-    one is worth knowing before it happens. `g++` implicitly includes
-    `stdc-predef.h`, the mandatory `-C` keeps its comments in the generated
-    `.f`, and the apostrophe in `glibc's intent ...` reads to flang's
-    fixed-form scanner as an unclosed character literal — a syntax error
-    pointing at a copyright notice in a file nobody wrote. gfortran survives it
-    only because its own `-cpp` pass strips C comments; flang's does not. clang
-    never injects the header, so clang is the preprocessor to use; configuring
-    the bad pairing is now a `FATAL_ERROR` rather than that scanner error.
+- **Windows is built now**, so it is no longer on this list; see *The Windows
+  build* below for what it took and what stays true.
 - **VCell-generated inputs.** Every input in `tests/resources/` is
   hand-written. None has yet come out of VCell's `FiniteVolumeFileWriter`.
