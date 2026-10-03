@@ -122,6 +122,25 @@ jobs:
             Write-Host "::error::clang-cl is version $actual but Windows-AMD64_profile.txt pins compiler.version=$expected. The LLVM version is pinned in the install step above; change both together, and re-run the flang parity workflow if the Fortran compiler moved."
             exit 1
           }
+          # compiler.runtime_version maps to a Visual Studio installation, and a
+          # mismatch surfaces inside a dependency's generate() as "VS
+          # non-existing installation", naming neither this file nor the
+          # profile. v144 is VS 17, v145 is VS 18.
+          # A table rather than arithmetic, because the mapping is not regular:
+          # v143 and v144 are both Visual Studio 17 (2022), v145 is 18.
+          $toolsetToVs = @{ 'v142' = 16; 'v143' = 17; 'v144' = 17; 'v145' = 18 }
+          $rt = (Select-String -Path conan-profiles/CI-CD/Windows-AMD64_profile.txt `
+                  -Pattern '^compiler\.runtime_version=(v\d+)').Matches[0].Groups[1].Value
+          $haveVs = [int]($env:VisualStudioVersion -split '\.')[0]
+          if (-not $toolsetToVs.ContainsKey($rt)) {
+            Write-Host "::warning::runtime_version $rt is not in this check's table; add it. Visual Studio here is $haveVs."
+          } elseif ($toolsetToVs[$rt] -ne $haveVs) {
+            Write-Host "::error::the runner has Visual Studio $haveVs but Windows-AMD64_profile.txt sets compiler.runtime_version=$rt, which Conan resolves to Visual Studio $($toolsetToVs[$rt]). Update that line."
+            exit 1
+          } else {
+            Write-Host "  Visual Studio $haveVs matches runtime_version=$rt"
+          }
+
           # Chombo needs GNU make 4+, and BuildChomboLibs.cmake refuses older.
           & $env:CHOMBO_MAKE --version | Select-Object -First 1
           & $env:CHOMBO_PERL --version | Select-String 'This is perl'

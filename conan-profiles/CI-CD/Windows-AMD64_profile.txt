@@ -45,7 +45,19 @@ compiler.cppstd=20
 # from a static profile, so there is a precedent to check against rather than a
 # known answer.
 compiler.runtime=static
-compiler.runtime_version=v144
+# v145, not fvsolver's v144, and this one has to track the runner image rather
+# than being copied. Conan maps runtime_version to a Visual Studio
+# installation: v144 is VS 17, v145 is VS 18. The windows-latest image now
+# ships VS 18.0 with VC tools 14.51, so v144 resolves to a VS 17 that is not
+# there and the graph fails in a dependency's generate() with "VS non-existing
+# installation: Visual Studio 17" -- setting
+# tools.microsoft.msbuild:vs_version=18 above does not help, because the 17
+# comes from here.
+#
+# The workflow checks this against the installed VisualStudioVersion, so the
+# next image bump fails with a message naming this line instead of a Conan
+# recipe.
+compiler.runtime_version=v145
 os=Windows
 
 [conf]
