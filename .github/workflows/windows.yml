@@ -203,6 +203,7 @@ jobs:
             -DCHOMBO_MAKE_PROGRAM="$env:CHOMBO_MAKE" `
             -DCHOMBO_PERL_PROGRAM="$env:CHOMBO_PERL" `
             -DCHOMBO_BASH_PROGRAM="$env:CHOMBO_BASH" `
+            -DCHOMBO_UNIX_TOOLS_DIR="$env:MSYS2_USR_BIN" `
             -DOPTION_TARGET_MESSAGING=OFF
 
       - name: Confirm the toolchain CMake actually picked

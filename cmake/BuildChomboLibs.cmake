@@ -71,6 +71,34 @@ find_program(CHOMBO_PERL_PROGRAM NAMES perl REQUIRED
 find_program(CHOMBO_BASH_PROGRAM NAMES bash REQUIRED
 		DOC "bash, used to run Chombo's pipelines with pipefail set")
 
+# Chombo's makefiles also call find, chmod and cp bare, and expect GNU
+# semantics. On Windows that is a problem of resolution rather than absence:
+# C:/Windows/System32 comes first on PATH and its find.exe is a text search
+# tool, so the include target's find/-exec chmod line fails with
+# "File not found - *.H" and the build stops after archiving.
+#
+# Point this at a directory of GNU versions -- MSYS2's usr/bin -- and it is
+# prepended to PATH for the make invocations below, and only for those.
+# Scoping it that narrowly is deliberate: the same directory holds a coreutils
+# link.exe, which would shadow MSVC's linker if it were on PATH while the
+# solver itself is being linked.
+set(CHOMBO_UNIX_TOOLS_DIR "" CACHE PATH
+		"Directory of GNU find/chmod/cp for Chombo's makefiles (needed on Windows)")
+
+set(_chombo_make_launcher "")
+if (CHOMBO_UNIX_TOOLS_DIR)
+	if (NOT EXISTS "${CHOMBO_UNIX_TOOLS_DIR}/find.exe"
+			AND NOT EXISTS "${CHOMBO_UNIX_TOOLS_DIR}/find")
+		message(FATAL_ERROR
+				"CHOMBO_UNIX_TOOLS_DIR is ${CHOMBO_UNIX_TOOLS_DIR} but there is no find "
+				"there. It should name a directory of GNU utilities, such as MSYS2's "
+				"usr/bin.")
+	endif ()
+	set(_chombo_make_launcher ${CMAKE_COMMAND} -E env
+			"PATH=${CHOMBO_UNIX_TOOLS_DIR};$ENV{PATH}")
+	message(STATUS "Chombo's make will run with ${CHOMBO_UNIX_TOOLS_DIR} ahead of PATH")
+endif ()
+
 # Chombo picks its compiler flag set by matching the basename of $(CXX)/$(FC)
 # against names it knows (g++, gfortran, icpc, ...).  CMake often hands us the
 # generic /usr/bin/c++ driver, which Chombo would not recognise -- it would fall
@@ -332,11 +360,11 @@ function(add_chombo_dimension DIM)
 			# AMRTimeDependent/AMR.cpp installs a Ctrl-C handler through sigaction,
 			# which Windows has no equivalent for. Not building it is a better answer
 			# than porting it.
-			COMMAND ${CHOMBO_MAKE_PROGRAM} -j${CHOMBO_BUILD_JOBS} ${CHOMBO_LINK_ORDER} ${_make_vars}
+			COMMAND ${_chombo_make_launcher} ${CHOMBO_MAKE_PROGRAM} -j${CHOMBO_BUILD_JOBS} ${CHOMBO_LINK_ORDER} ${_make_vars}
 			# `lib` ran this itself once its libraries were built. It copies each
 			# library's public headers -- the generated *_F.H among them -- into
 			# chombo/lib/include, which is what CollectChomboLibs.cmake snapshots.
-			COMMAND ${CHOMBO_MAKE_PROGRAM} include ${_make_vars}
+			COMMAND ${_chombo_make_launcher} ${CHOMBO_MAKE_PROGRAM} include ${_make_vars}
 			WORKING_DIRECTORY "${CHOMBO_LIB_DIR}"
 			COMMAND ${CMAKE_COMMAND}
 			-DCHOMBO_LIB_DIR=${CHOMBO_LIB_DIR}
