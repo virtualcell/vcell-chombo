@@ -145,11 +145,24 @@ jobs:
         shell: pwsh
         run: |
           . .\build\generators\conanbuild.ps1
-          # -fsanitize=address on the compile side instruments the code; the
-          # link side gets the runtime libraries by name, from the step above,
-          # because CMake links with lld-link rather than the clang driver.
-          # /Z7 puts debug info in the object files, without which the report is
+          # Through the CXXFLAGS and LDFLAGS environment variables, not
+          # -DCMAKE_CXX_FLAGS. A -D on the command line *replaces* the flags
+          # CMake computes for the platform, and that silently dropped /EHsc:
+          #
+          #   error: cannot use 'throw' with exceptions disabled
+          #
+          # CMake initialises CMAKE_CXX_FLAGS from its own platform defaults
+          # plus CXXFLAGS, so the environment variable adds rather than
+          # overrides. Writing out the MSVC default set by hand instead
+          # (/DWIN32 /D_WINDOWS /W3 /GR /EHsc) would work until CMake changed it.
+          #
+          # -fsanitize=address instruments the code; the runtime libraries come
+          # from the step above, because CMake links with lld-link rather than
+          # the clang driver, which would otherwise translate the flag itself.
+          # /Z7 puts debug info in the object files -- without it the report is
           # addresses rather than source lines.
+          $env:CXXFLAGS = "-fsanitize=address /Z7"
+          $env:LDFLAGS = "$env:ASAN_LINK_FLAGS"
           #
           # The dependencies and Chombo stay uninstrumented, which is fine --
           # see the note at the top of this file.
@@ -169,8 +182,6 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE="$PWD/build/generators/conan_toolchain.cmake" `
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_TRY_COMPILE_CONFIGURATION=Release `
-            -DCMAKE_CXX_FLAGS="-fsanitize=address /Z7" `
-            -DCMAKE_EXE_LINKER_FLAGS="$env:ASAN_LINK_FLAGS" `
             -DCMAKE_Fortran_COMPILER="flang" `
             -DCHOMBO_CH_CPP="clang -E -P -C -x c" `
             -DCHOMBO_MAKE_PROGRAM="$env:CHOMBO_MAKE" `
