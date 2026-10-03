@@ -161,7 +161,24 @@ jobs:
           # the clang driver, which would otherwise translate the flag itself.
           # /Z7 puts debug info in the object files -- without it the report is
           # addresses rather than source lines.
-          $env:CXXFLAGS = "-fsanitize=address /Z7"
+          # _DISABLE_STRING_ANNOTATION and _DISABLE_VECTOR_ANNOTATION are
+          # required by the partial instrumentation this job uses on purpose.
+          # MSVC's STL annotates std::string and std::vector buffers when ASan
+          # is on, and emits a /failifmismatch directive so that mixing
+          # annotated and unannotated objects is caught at link:
+          #
+          #   lld-link: error: /failifmismatch: mismatch detected for
+          #   'annotate_string'
+          #
+          # The solver is instrumented; Chombo's archives and the Conan
+          # dependencies are not. Turning the annotations off makes both sides
+          # agree, which is MSVC's documented answer for exactly this mix.
+          #
+          # The cost is container-overflow detection inside a std::vector's own
+          # buffer. Overflows past the end of the allocation are still caught,
+          # and the fault being chased is heap-level corruption, so that is the
+          # right trade here -- instrumenting Chombo as well would restore it.
+          $env:CXXFLAGS = "-fsanitize=address /Z7 -D_DISABLE_STRING_ANNOTATION=1 -D_DISABLE_VECTOR_ANNOTATION=1"
           $env:LDFLAGS = "$env:ASAN_LINK_FLAGS"
           #
           # The dependencies and Chombo stay uninstrumented, which is fine --
