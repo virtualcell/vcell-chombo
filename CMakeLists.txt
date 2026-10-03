@@ -68,6 +68,20 @@ if (NOT APPLE AND NOT LINUX AND NOT WIN32)
 	message(FATAL_ERROR "Unsupported operating system: ${CMAKE_SYSTEM_NAME}.")
 endif ()
 
+if (WIN32)
+	# One header, for one line in a submodule: vcell-messaging's
+	# SimulationMessaging.h includes <sys/time.h>, which the MSVC runtime does not
+	# have, and uses only time_t from it. Four of the solver's own sources include
+	# that header, so this has to be visible to them as well as to the messaging
+	# library itself -- hence directory scope rather than one target.
+	#
+	# The alternative was patching vcell-messaging, which is shared with
+	# vcell-ode, vcell-stochastic and vcell-mbsolver and so has to go upstream
+	# before the gitlink here can move. Worth doing eventually; not worth blocking
+	# a Windows build on. See cmake/compat/windows/sys/time.h.
+	include_directories(BEFORE "${CMAKE_SOURCE_DIR}/cmake/compat/windows")
+endif ()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
