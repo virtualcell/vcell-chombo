@@ -95,18 +95,18 @@ ifeq ($(fname),flang)
   # set explicitly so the intent survives either change.
   deffcomflags = -ffp-contract=off
 
-  # ChomboFortran's fort72 pass starts statements in column 4, inside fixed
-  # form's 1-5 label field. gfortran accepts that silently; flang reports
-  # "Character in fixed-form label field must be a digit" on every single file,
-  # which buries everything else.
+  # No -Wno-scanning here, and the history is worth keeping. ChomboFortran
+  # emitted its `subroutine' line with a single leading space, putting the first
+  # character in fixed form's 1-5 label field. gfortran accepts that silently
+  # and flang 21 only warned, so this suppressed the warning on the grounds that
+  # flang's recovery was exactly right -- which a bit-identical parity run had
+  # established.
   #
-  # Suppressed rather than corrected, on purpose. flang's recovery is exactly
-  # right -- a parity run swapping only the Fortran compiler reproduced the
-  # stored regression baselines bit for bit, so nothing is being hidden. Fixing
-  # fort72 to pad to column 7 would be the tidier answer, but it would change
-  # the generated Fortran on every platform to silence a warning on one, and
-  # that is a poor trade against the bit-identity just established.
-  deffcomflags += -Wno-scanning
+  # flang 22 makes it a hard error with no warning group to suppress, and
+  # Windows flang starts at 22, so there was no version that both runs on
+  # Windows and tolerates it. fort72 pads the line now instead; see the comment
+  # there. Nothing to suppress, and leaving a suppression behind would hide the
+  # next occurrence.
 
   ifeq ($(USE_64),TRUE)
     deffcomflags += -m64

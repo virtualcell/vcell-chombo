@@ -169,13 +169,18 @@ it is checked. `.github/workflows/release.yml` builds it. Things that bite:
     which dispatches to gfortran, which refuses `-E` without `-cpp` — so the
     error names gcc from a step that never mentions it. `-x c` says
     "preprocess this as text", which is all the pipeline ever meant.
-  - flang warns `Character in fixed-form label field must be a digit` on every
-    ChomboFortran file. `fort72` starts statements at column 4, inside fixed
-    form's 1–5 label field; gfortran accepts that silently and flang recovers
-    with a warning. The recovery is exactly correct: a parity run swapping only
-    the Fortran compiler reproduced the stored regression baselines *bit for
-    bit*, so the warning can be silenced with `-Wno-scanning`. See
-    `tests/README.md` for the figure.
+  - ChomboFortran emitted its `subroutine` line with one leading space, putting
+    the `s` in column 2 — inside fixed form's 1–5 label field. gfortran accepts
+    that silently and flang 21 only warned, but **flang 22 rejects it outright**
+    (`Character in fixed-form label field must be a digit`, with no warning
+    group to suppress), and Windows flang starts at 22. `fort72` now pads such
+    lines to column 7. It pads only a first non-blank in columns 1–5 that is
+    not a digit: a numeric label belongs in that field, and **column 6 is the
+    continuation marker** — Chombo's hand-written `.ChF` uses `$` there as well
+    as the `     &` fort72 emits, and a rule reaching column 6 silently turns a
+    continuation into a new statement. Measured before and after across 40
+    generated files: exactly one line changes per file, and the regression
+    baselines still match bit for bit.
   - flang cannot be paired with GCC as the ChomboFortran preprocessor, and this
     one is worth knowing before it happens. `g++` implicitly includes
     `stdc-predef.h`, the mandatory `-C` keeps its comments in the generated

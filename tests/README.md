@@ -64,10 +64,13 @@ What has actually been measured, rather than assumed:
   `rtol=0 atol=0`, which this file's 17-significant-digit baselines make a
   meaningful comparison rather than a rounding artifact. So the worst-case
   relative difference for that toolchain change is zero, and no tolerance had to
-  move. It also settles flang's `Character in fixed-form label field must be a
-  digit` warning, which it emits on every ChomboFortran file because `fort72`
-  starts statements at column 4: its recovery is exactly correct, so silencing
-  that warning is defensible, and this run is the evidence for it.
+  move.
+
+  These baselines are also what established that correcting ChomboFortran's
+  fixed-form column placement changes nothing. `fort72` now pads a `subroutine`
+  line from column 2 to column 7, because flang 22 rejects the former outright;
+  the generated Fortran changes by exactly one line per file, and these numbers
+  do not change at all.
 
 - **Portability.** The baselines are generated on Linux with GCC 13. The same
   source compiled for a different architecture will not reproduce these fields
