@@ -15,12 +15,19 @@ name: Windows ASan
 # look, not finding the bug. AddressSanitizer reports the offending write and
 # the allocation it belongs to, which is the actual question.
 #
-# Only the C++ compiled by CMake is instrumented -- the solver and the
-# submodules. Chombo's archives are left alone, which keeps this to two flags
-# and no new plumbing: ASan supports partial instrumentation, and its
-# interceptors cover every heap operation in the process regardless of which
-# object file made the call. If the report points into Chombo rather than at
-# our own code, the next step is instrumenting Chombo's make as well.
+# Every C++ translation unit is instrumented: the solver and submodules through
+# CXXFLAGS, and Chombo through CHOMBO_EXTRA_CXXFLAGS, which compiles via its own
+# make and so never sees CMAKE_CXX_FLAGS.
+#
+# Instrumenting only one side was tried first and does not work. MSVC's STL
+# annotates its containers under ASan and emits /failifmismatch directives, so
+# the link fails on annotate_string, then annotate_optional, and onward through
+# whatever categories that STL version has. Disabling them one macro per round
+# is a losing game; instrumenting both sides makes them agree and keeps the
+# container-overflow coverage that disabling would have thrown away.
+#
+# The Conan dependencies stay uninstrumented and that is fine -- hdf5, zlib and
+# libzip are C, so none of them brings the C++ STL into a header.
 #
 # Fortran is not instrumented. flang's ASan support is less travelled, and the
 # allocations here are all made from the C++ side.
@@ -161,24 +168,7 @@ jobs:
           # the clang driver, which would otherwise translate the flag itself.
           # /Z7 puts debug info in the object files -- without it the report is
           # addresses rather than source lines.
-          # _DISABLE_STRING_ANNOTATION and _DISABLE_VECTOR_ANNOTATION are
-          # required by the partial instrumentation this job uses on purpose.
-          # MSVC's STL annotates std::string and std::vector buffers when ASan
-          # is on, and emits a /failifmismatch directive so that mixing
-          # annotated and unannotated objects is caught at link:
-          #
-          #   lld-link: error: /failifmismatch: mismatch detected for
-          #   'annotate_string'
-          #
-          # The solver is instrumented; Chombo's archives and the Conan
-          # dependencies are not. Turning the annotations off makes both sides
-          # agree, which is MSVC's documented answer for exactly this mix.
-          #
-          # The cost is container-overflow detection inside a std::vector's own
-          # buffer. Overflows past the end of the allocation are still caught,
-          # and the fault being chased is heap-level corruption, so that is the
-          # right trade here -- instrumenting Chombo as well would restore it.
-          $env:CXXFLAGS = "-fsanitize=address /Z7 -D_DISABLE_STRING_ANNOTATION=1 -D_DISABLE_VECTOR_ANNOTATION=1"
+          $env:CXXFLAGS = "-fsanitize=address /Z7"
           $env:LDFLAGS = "$env:ASAN_LINK_FLAGS"
           #
           # The dependencies and Chombo stay uninstrumented, which is fine --
@@ -204,6 +194,7 @@ jobs:
             -DCHOMBO_MAKE_PROGRAM="$env:CHOMBO_MAKE" `
             -DCHOMBO_PERL_PROGRAM="$env:CHOMBO_PERL" `
             -DCHOMBO_BASH_PROGRAM="$env:CHOMBO_BASH" `
+            -DCHOMBO_EXTRA_CXXFLAGS="-fsanitize=address /Z7" `
             -DOPTION_TARGET_MESSAGING=OFF `
             -DOPTION_TARGET_CHOMBO3D_SOLVER=OFF
 
