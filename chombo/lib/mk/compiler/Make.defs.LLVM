@@ -50,8 +50,17 @@ ifneq ($(filter $(cxxname),clang clang++),)
                    -Wno-invalid-offsetof -Wno-variadic-macros
 
   defcxxcomflags := $(_cxxbaseflags)
-  defcxxoptflags := -O2 -funroll-loops
   defcxxdbgflags := -g -Wall
+
+  # clang-cl ignores -funroll-loops with a warning rather than rejecting it, so
+  # it has to go through the /clang: passthrough there to have any effect. -O2
+  # it does understand. $(CXX) is tested directly because $(cxxname) reduces
+  # clang-cl to plain `clang' -- Make.defs splits on '-'.
+  ifneq ($(findstring clang-cl,$(CXX)),)
+    defcxxoptflags := -O2 /clang:-funroll-loops
+  else
+    defcxxoptflags := -O2 -funroll-loops
+  endif
 
   ifeq ($(USE_64),TRUE)
     defcxxcomflags += -m64

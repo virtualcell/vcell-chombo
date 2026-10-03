@@ -220,6 +220,21 @@ function(add_chombo_dimension DIM)
 	# Hoisted into a list because two make invocations need the same set. Every
 	# one of these is a command-line override, which beats anything a makefile
 	# sets -- the reason this build needs no generated mk/Make.defs.local.
+	# clang-cl's driver is MSVC-flag-compatible, and an unrecognised GNU flag
+	# there produces "unknown argument ignored in clang-cl: '-std=gnu++17'" and
+	# carries on, which is worse than an error because the build looks fine.
+	# CMAKE_CXX_COMPILER_FRONTEND_VARIANT is how CMake distinguishes clang-cl
+	# (MSVC) from clang (GNU).
+	#
+	# /std:c++17 rather than a gnu++17 equivalent, which clang-cl has no spelling
+	# for. The GNU extensions are not missed: clang-cl has been compiling this
+	# tree at its own default standard all along, since the flag never applied.
+	if (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+		set(_chombo_std_flag "XTRACXXFLAGS=/std:c++17")
+	else ()
+		set(_chombo_std_flag "XTRACXXFLAGS=-std=gnu++17")
+	endif ()
+
 	set(_make_vars
 			# --- what gets built ---
 			DIM=${DIM}
@@ -297,7 +312,11 @@ function(add_chombo_dimension DIM)
 			# everywhere, rather than letting any platform become the first to compile
 			# Chombo as C++20. The solver's own translation units stay C++20, which
 			# the submodules require; that split is the status quo, not a new one.
-			XTRACXXFLAGS=-std=gnu++17)
+			#
+			# The spelling is chosen below rather than here: clang-cl takes MSVC-style
+			# flags and does not reject the GNU one, it IGNORES it with a warning, so
+			# this pin was silently doing nothing on Windows.
+			${_chombo_std_flag})
 
 	add_custom_command(
 			OUTPUT ${_libs} ${_stamp}
