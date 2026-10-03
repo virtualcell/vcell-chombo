@@ -169,7 +169,24 @@ jobs:
           # /Z7 puts debug info in the object files -- without it the report is
           # addresses rather than source lines.
           $env:CXXFLAGS = "-fsanitize=address /Z7"
-          $env:LDFLAGS = "$env:ASAN_LINK_FLAGS"
+          # /DEBUG so the linker emits a PDB. /Z7 alone puts debug info in the
+          # object files, which is not enough -- llvm-symbolizer reads the PDB,
+          # and without one the report is bare module offsets:
+          #
+          #   #1 0x7ff7b428c2d9  (VCellChombo2D_x64.exe+0x14001c2d9)
+          #
+          # /opt:noicf because identical COMDAT folding merges identical
+          # constants, and ASan's per-global redzones do not survive it. The
+          # first report landed on an address that was simultaneously 31 bytes
+          # past a CH_Timer format string and the start of an unrelated empty
+          # literal from ChomboGeometryShop.cpp -- two globals in one place,
+          # which is folding rather than a bug. ICF has to be off for a global
+          # overflow report to mean anything.
+          #
+          # /INCREMENTAL:NO because incremental linking and /opt are
+          # incompatible, and the linker would otherwise just warn and ignore
+          # one of them.
+          $env:LDFLAGS = "$env:ASAN_LINK_FLAGS /DEBUG /INCREMENTAL:NO /opt:noicf"
           #
           # The dependencies and Chombo stay uninstrumented, which is fine --
           # see the note at the top of this file.
