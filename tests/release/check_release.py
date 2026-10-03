@@ -195,7 +195,13 @@ def run_case(case: Case, args: argparse.Namespace, broker: FakeBroker | None, si
 
     text = (RESOURCES / case.input).read_text()
     base = base_name(text)
-    text = re.sub(r"^BASE_FILE_NAME\s+\S+", f"BASE_FILE_NAME {solver_dir / base}", text, count=1, flags=re.M)
+    # A replacement *function* is used verbatim; a replacement string has its
+    # backslashes interpreted as escapes, and a Windows path is full of them --
+    # "bad escape \c" from D:\a\...\check\... on the first run of this on
+    # Windows.
+    text = re.sub(r"^BASE_FILE_NAME\s+\S+",
+                  lambda _m: f"BASE_FILE_NAME {solver_dir / base}",
+                  text, count=1, flags=re.M)
     argv = runner + [exe_cmd, str(solver_dir / case.input)]
     if broker:
         text = jms_block(broker.port, sim_key) + text
