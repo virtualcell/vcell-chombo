@@ -220,13 +220,16 @@ int TraceTimer::initializer()
   else if (strncmp(timerEnv, "SAMPLE=",7)==0)
     {
 #ifdef CH_USE_MEMORY_TRACKING
-#ifndef CH_DISABLE_SIGNALS
+// _WIN32 joins CH_DISABLE_SIGNALS here, as it does in CH_Attach.cpp: ualarm and
+// SIGALRM are POSIX interval timers and the MSVC runtime has neither. This only
+// drives the CH_TIMER=SAMPLE= memory sampler, which is a diagnostic.  <vcell>
+#if !defined(CH_DISABLE_SIGNALS) && !defined(_WIN32)
       sampleFrequency = atoi(timerEnv+7);
       signal(SIGALRM, sampleMem);
       ualarm( sampleFrequency, sampleFrequency );
       s_memorySampling = true;
 #else 
-      std::cout<<"Chombo was compiled with memory tracking, but CH_DISABLE_SIGNALS was set.  no samples created"<<std::endl;
+      std::cout<<"Chombo was compiled with memory tracking, but interval-timer signals are unavailable (CH_DISABLE_SIGNALS, or Windows).  no samples created"<<std::endl;
 #endif
 #else
       std::cout<<"CH_USE_MEMORY_TRACKING was not used during compilation, so no memory sampling will happen"<<std::endl;

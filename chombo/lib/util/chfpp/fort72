@@ -37,6 +37,25 @@ sub strip72 {
     # look for Fortran comment lines being with "C", "c" or "*" or "!"
     # or empty continuation lines and don't output them
     next if ( m/^[c\*]/i || m/^\s*!/ || m/^.....[^0]\s*$/ );
+    ## In fixed form a statement has to begin at column 7: columns 1-5 are the
+    ## label field and column 6 is the continuation marker.  ChomboFortran emits
+    ## its `subroutine' line with a single leading space, which puts the `s' in
+    ## the label field.  gfortran accepts that silently, and flang up to 21 only
+    ## warned, but flang 22 rejects it outright -- "Character in fixed-form
+    ## label field must be a digit" -- and Windows flang starts at 22.  So it has
+    ## to be corrected here rather than tolerated by the compiler.  <vcell>
+    ##
+    ## Only a line whose first non-blank falls in columns 1-5 and is not a digit
+    ## is moved.  A numeric label belongs in that field and is left where it is.
+    ##
+    ## \s{0,4} and not \s{0,5}, which matters: column 6 is the continuation
+    ## marker and ANY non-blank there is one.  Chombo's hand-written .ChF uses
+    ## `$' for that as well as the `     &' this routine emits below, and a
+    ## 5-space allowance reaches column 6 and would shift those to column 7,
+    ## silently turning a continuation into a new statement.
+    if ( m/^\s{0,4}[^\s\d]/ ) {
+        s/^\s*/      / ;
+    }
     # break the line into 72 character pieces with continuations
     # [NOTE: some of the `substr' calls will generate Perl warnings.]
     $out = substr($_,0,72) ;

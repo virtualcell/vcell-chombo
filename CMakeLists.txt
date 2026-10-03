@@ -40,9 +40,53 @@ if (CMAKE_SYSTEM_NAME MATCHES "Linux")
 	set(LINUX TRUE)
 endif ()
 
-if (NOT APPLE AND NOT LINUX)
-	message(FATAL_ERROR "Unsupported operating system: ${CMAKE_SYSTEM_NAME}. "
-			"Chombo's build system needs GNU make and a Unix shell; Windows builds went through Cygwin.")
+if (WIN32)
+	# Windows is supported through clang-cl and flang, which produce native
+	# MSVC-ABI binaries, following vcell-fvsolver. MSVC alone cannot build this:
+	# it has no Fortran compiler, and roughly half of Chombo is Fortran generated
+	# by a perl preprocessor.
+	#
+	# Note that MSYS2 is still required even here, and is not a leftover of the
+	# earlier MinGW attempt: ChomboFortran is perl, and chombo/lib/mk needs GNU
+	# make and a shell with pipefail whoever compiles the code. MSYS2 supplies
+	# those as build tools while nothing it ships compiles anything.
+	if (NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+		message(FATAL_ERROR
+				"On Windows this must be built with clang-cl (CMAKE_CXX_COMPILER_ID is "
+				"${CMAKE_CXX_COMPILER_ID}). MSVC has no Fortran compiler and cannot "
+				"drive ChomboFortran.")
+	endif ()
+	if (NOT CMAKE_Fortran_COMPILER_ID MATCHES "Flang")
+		message(FATAL_ERROR
+				"On Windows the Fortran compiler must be flang (CMAKE_Fortran_COMPILER_ID "
+				"is ${CMAKE_Fortran_COMPILER_ID}). Chombo's Fortran is fixed-form and "
+				"generated; see chombo/lib/mk/compiler/Make.defs.LLVM.")
+	endif ()
+endif ()
+
+if (NOT APPLE AND NOT LINUX AND NOT WIN32)
+	message(FATAL_ERROR "Unsupported operating system: ${CMAKE_SYSTEM_NAME}.")
+endif ()
+
+if (WIN32)
+	# One header, for one line in a submodule: vcell-messaging's
+	# SimulationMessaging.h includes <sys/time.h>, which the MSVC runtime does not
+	# have, and uses only time_t from it. Four of the solver's own sources include
+	# that header, so this has to be visible to them as well as to the messaging
+	# library itself -- hence directory scope rather than one target.
+	#
+	# The alternative was patching vcell-messaging, which is shared with
+	# vcell-ode, vcell-stochastic and vcell-mbsolver and so has to go upstream
+	# before the gitlink here can move. Worth doing eventually; not worth blocking
+	# a Windows build on. See cmake/compat/windows/sys/time.h.
+	include_directories(BEFORE "${CMAKE_SOURCE_DIR}/cmake/compat/windows")
+
+	# The solver's own translation units include Chombo's snapshotted headers, so
+	# they need the same reprieve Chombo's build gets in Make.defs.LLVM:
+	# BaseTools/IndexTMI.H uses std::ptr_fun and std::bind2nd, removed in C++17.
+	# libstdc++ keeps them regardless, MSVC's STL does not, and this is its
+	# documented switch. See the longer note in Make.defs.LLVM.
+	add_compile_definitions(_HAS_AUTO_PTR_ETC=1)
 endif ()
 
 set(CMAKE_CXX_STANDARD 20)

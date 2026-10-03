@@ -140,7 +140,7 @@ void DataSet::write(SimulationExpression *sim, char* filename)
 	H5Aclose(attribute);
 
 	int rank = 1;
-	hsize_t dim[1] = {sim->getOutputVarCount()};
+	hsize_t dim[1] = {static_cast<hsize_t>(sim->getOutputVarCount())};
 	hid_t strType = H5Tcopy(H5T_C_S1);
   H5Tset_size(strType, H5T_VARIABLE);
 	hsize_t space = H5Screate_simple(rank, dim, NULL);
@@ -282,15 +282,15 @@ void DataSet::writeMembraneSolution(SimulationExpression* sim, hid_t h5SimFile)
 
 		int rank = 1;
 		// memory dataspace dimensions
-		hsize_t dim[] = {var->getSize()};
+		hsize_t dim[] = {static_cast<hsize_t>(var->getSize())};
 		hid_t memSpace = H5Screate_simple(rank, dim, NULL);
 #ifdef CH_MPI
 		// file dataspace dimensions
 		dim[0] = totalNumMembranePoints;
 		hsize_t fileSpace = H5Screate_simple(rank, dim, NULL);
 		// select offset in file space
-		hsize_t start[] = {memIndexOffset};
-		hsize_t count[] = {var->getSize()};
+		hsize_t start[] = {static_cast<hsize_t>(memIndexOffset)};
+		hsize_t count[] = {static_cast<hsize_t>(var->getSize())};
 		herr_t err = H5Sselect_hyperslab(fileSpace, H5S_SELECT_SET, start, NULL, count, NULL);
 		if (err < 0)
 		{
@@ -359,7 +359,7 @@ void DataSet::writeExtrapolatedValues(SimulationExpression* sim, hid_t h5SimFile
 		
 		int rank = 1;
 		// memory dataspace dimensions
-		hsize_t dim[] = {numMembranePoints};
+		hsize_t dim[] = {static_cast<hsize_t>(numMembranePoints)};
 		hid_t memSpace = H5Screate_simple(rank, dim, NULL);
 
 #ifdef CH_MPI
@@ -367,8 +367,8 @@ void DataSet::writeExtrapolatedValues(SimulationExpression* sim, hid_t h5SimFile
 		dim[0] = totalNumMembranePoints;
 		hsize_t fileSpace = H5Screate_simple(rank, dim, NULL);
 		// select offset in file space
-		hsize_t start[] = {memIndexOffset};
-		hsize_t count[] = {numMembranePoints};
+		hsize_t start[] = {static_cast<hsize_t>(memIndexOffset)};
+		hsize_t count[] = {static_cast<hsize_t>(numMembranePoints)};
 		herr_t err = H5Sselect_hyperslab(fileSpace, H5S_SELECT_SET, start, NULL, count, NULL);
 		if (err < 0)
 		{

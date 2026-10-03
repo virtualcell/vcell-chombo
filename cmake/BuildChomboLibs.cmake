@@ -220,6 +220,34 @@ function(add_chombo_dimension DIM)
 	# Hoisted into a list because two make invocations need the same set. Every
 	# one of these is a command-line override, which beats anything a makefile
 	# sets -- the reason this build needs no generated mk/Make.defs.local.
+	# clang-cl's driver is MSVC-flag-compatible, and an unrecognised GNU flag
+	# there produces "unknown argument ignored in clang-cl: '-std=gnu++17'" and
+	# carries on, which is worse than an error because the build looks fine.
+	# CMAKE_CXX_COMPILER_FRONTEND_VARIANT is how CMake distinguishes clang-cl
+	# (MSVC) from clang (GNU).
+	#
+	# /std:c++17 rather than a gnu++17 equivalent, which clang-cl has no spelling
+	# for. The GNU extensions are not missed: clang-cl has been compiling this
+	# tree at its own default standard all along, since the flag never applied.
+	# Extra flags for Chombo's own C++, appended to the standard pin below. The
+	# hook exists because Chombo compiles through its own make rather than through
+	# CMake, so CMAKE_CXX_FLAGS does not reach it and there was no way to add a
+	# flag to both halves of the build at once.
+	#
+	# The case that needed it: instrumenting the solver with AddressSanitizer but
+	# not Chombo makes MSVC's STL emit a /failifmismatch on its container
+	# annotations, and the link fails on annotate_string, then annotate_optional,
+	# and so on through whatever categories that STL version has. Instrumenting
+	# both sides is the fix; disabling the annotations one macro at a time is not.
+	set(CHOMBO_EXTRA_CXXFLAGS "" CACHE STRING
+		"Extra flags for Chombo's own C++ compilation, appended to XTRACXXFLAGS")
+
+	if (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+		set(_chombo_std_flag "XTRACXXFLAGS=/std:c++17 ${CHOMBO_EXTRA_CXXFLAGS}")
+	else ()
+		set(_chombo_std_flag "XTRACXXFLAGS=-std=gnu++17 ${CHOMBO_EXTRA_CXXFLAGS}")
+	endif ()
+
 	set(_make_vars
 			# --- what gets built ---
 			DIM=${DIM}
@@ -297,7 +325,11 @@ function(add_chombo_dimension DIM)
 			# everywhere, rather than letting any platform become the first to compile
 			# Chombo as C++20. The solver's own translation units stay C++20, which
 			# the submodules require; that split is the status quo, not a new one.
-			XTRACXXFLAGS=-std=gnu++17)
+			#
+			# The spelling is chosen below rather than here: clang-cl takes MSVC-style
+			# flags and does not reject the GNU one, it IGNORES it with a warning, so
+			# this pin was silently doing nothing on Windows.
+			${_chombo_std_flag})
 
 	add_custom_command(
 			OUTPUT ${_libs} ${_stamp}

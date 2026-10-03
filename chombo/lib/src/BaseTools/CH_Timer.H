@@ -28,7 +28,13 @@
 
 #include <string>
 #include <iostream>
+// No <sys/time.h> in the MSVC runtime, which is what clang-cl compiles against
+// on Windows. <chrono> gives the same wall clock without it.  <vcell>
+#ifdef _WIN32
+#include <chrono>
+#else
 #include <sys/time.h>
+#endif
 
 #include "BaseNamespaceHeader.H"
 
@@ -379,10 +385,18 @@ using namespace std;
     //     return( MPI_Wtime() );
     // #endif
 #ifndef CH_NTIMER
+#ifdef _WIN32
+    // system_clock reads the same wall clock gettimeofday does, to the same
+    // resolution or better, and needs no POSIX header -- struct timeval on
+    // Windows means pulling in winsock2.h.  <vcell>
+    return std::chrono::duration<double>(
+             std::chrono::system_clock::now().time_since_epoch()).count();
+#else
     struct timeval tv;   //  Values from call to gettimeofday
     struct timezone tz;
     gettimeofday(&tv, &tz);
     return((double)tv.tv_sec + 0.000001 * (double)tv.tv_usec);
+#endif
 #else
     return 0;
 #endif

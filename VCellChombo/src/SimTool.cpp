@@ -34,7 +34,11 @@ using std::endl;
 // never showed up.
 #include "VCELL/VCellModel.h"
 
-#if ( !defined(WIN32) && !defined(WIN64) ) // UNIX
+// _WIN32 and _WIN64 as well as WIN32/WIN64: the latter pair is a MinGW and
+// legacy convention, and MSVC -- which is what clang-cl compiles against --
+// predefines only the underscored names. Testing only WIN32 meant this block
+// fired on clang-cl and pulled in a header the MSVC runtime does not have.
+#if ( !defined(WIN32) && !defined(WIN64) && !defined(_WIN32) && !defined(_WIN64) ) // UNIX
 #include <unistd.h>
 #endif
 
@@ -42,7 +46,7 @@ using std::endl;
 #define DIRECTORY_SEPARATOR_OTHER '/'
 
 #ifndef DIRECTORY_SEPARATOR
-#if ( defined(WIN32) || defined(WIN64) || defined(CH_CYGWIN) )
+#if ( defined(WIN32) || defined(WIN64) || defined(_WIN32) || defined(_WIN64) || defined(CH_CYGWIN) )
 #define DIRECTORY_SEPARATOR DIRECTORY_SEPARATOR_WINDOWS
 #else
 #define DIRECTORY_SEPARATOR DIRECTORY_SEPARATOR_OTHER

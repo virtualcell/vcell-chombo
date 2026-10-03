@@ -114,7 +114,14 @@ int registerMemorySignals()
 #endif
 #endif
 
-#ifndef CH_DISABLE_SIGNALS
+// _WIN32 joins CH_DISABLE_SIGNALS here, as in CH_Attach.cpp and CH_Timer.cpp:
+// SIGUSR2 is a POSIX user signal and the MSVC runtime defines no equivalent.
+// This only arms the on-demand memory-map dump, a diagnostic.
+//
+// Note the #ifndef CH_CYGWIN above, which upstream already uses to skip the
+// atexit hook on Windows -- so this file anticipated the platform, just not
+// this line.  <vcell>
+#if !defined(CH_DISABLE_SIGNALS) && !defined(_WIN32)
   // signal(SIGABRT, dumpmemoryabort);
   signal(SIGUSR2, dumpmemorymap);
 #endif

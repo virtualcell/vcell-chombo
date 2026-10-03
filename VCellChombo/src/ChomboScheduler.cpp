@@ -2858,7 +2858,7 @@ void ChomboScheduler::writeMeshHdf5(MembraneElementMetrics* metricsData, int ver
 	{
 		Vector<Box> vectBoxes = vectGrids[ilev].boxArray();
 		int numBoxes = vectBoxes.size();
-		hsize_t dim[] = {numBoxes};   /* Dataspace dimensions */
+		hsize_t dim[] = {static_cast<hsize_t>(numBoxes)};   /* Dataspace dimensions */
 		hid_t fileSpace = H5Screate_simple (rank, dim, NULL);
 		char levelBoxDataSetName[20];
 		sprintf(levelBoxDataSetName, "%s%d", BOXES_LEVEL_DATASET_PREFIX, ilev);
@@ -2890,7 +2890,7 @@ void ChomboScheduler::writeMeshHdf5(MembraneElementMetrics* metricsData, int ver
 	VCellModel* model = SimTool::getInstance()->getModel();
 	int numStructures = model->getNumFeatures() + model->getNumMembranes();
 	
-	hsize_t dim[] = {numStructures};   /* Dataspace dimensions */
+	hsize_t dim[] = {static_cast<hsize_t>(numStructures)};   /* Dataspace dimensions */
 	int rank = 1;  // number of dimensions
 	hid_t fileSpace = H5Screate_simple (rank, dim, NULL);
 	hid_t structureDataset = H5Dcreate(h5MeshFile, STRUCTURES_DATASET, sType, fileSpace, H5P_DEFAULT);
@@ -2932,7 +2932,7 @@ void ChomboScheduler::writeMeshHdf5(MembraneElementMetrics* metricsData, int ver
 	hid_t sType = FeaturePhaseVol::createH5Type();
 
 	int ts = phaseVolumeList[phase0].size() + phaseVolumeList[phase1].size();
-	hsize_t dim[] = {ts};   /* Dataspace dimensions */
+	hsize_t dim[] = {static_cast<hsize_t>(ts)};   /* Dataspace dimensions */
 	int rank = 1;  // number of dimensions
 	hid_t fileSpace = H5Screate_simple (rank, dim, NULL);
 	hid_t ds = H5Dcreate(h5MeshFile, FETUREPHASEVOLS_DATASET, sType, fileSpace, H5P_DEFAULT);
@@ -2971,7 +2971,7 @@ void ChomboScheduler::writeMeshHdf5(MembraneElementMetrics* metricsData, int ver
 	{
 		ts += phaseVolumeList[phase0][ivol]->adjacentVolumes.size();
 	}
-	hsize_t dim[] = {ts};   /* Dataspace dimensions */
+	hsize_t dim[] = {static_cast<hsize_t>(ts)};   /* Dataspace dimensions */
 	int rank = 1;  // number of dimensions
 	hid_t fileSpace = H5Screate_simple (rank, dim, NULL);
 	hid_t ds = H5Dcreate(h5MeshFile, MEMBRANEIDS_DATASET, sType, fileSpace, H5P_DEFAULT);
@@ -3009,7 +3009,7 @@ void ChomboScheduler::writeMeshHdf5(MembraneElementMetrics* metricsData, int ver
 	hid_t metricsType = MembraneElementMetrics::createH5Type();
 	int rank = 1;
 	// memory dataspace dimensions
-	hsize_t dim[] = {numMembranePoints};
+	hsize_t dim[] = {static_cast<hsize_t>(numMembranePoints)};
 	hid_t memSpace = H5Screate_simple(rank, dim, NULL);
 
 #ifdef CH_MPI
@@ -3017,8 +3017,8 @@ void ChomboScheduler::writeMeshHdf5(MembraneElementMetrics* metricsData, int ver
 	dim[0] = totalNumMembranePoints;
 	hid_t fileSpace = H5Screate_simple(rank, dim, NULL);
 	// select offset in file space
-	hsize_t start[] = {memIndexOffset};
-	hsize_t count[] = {numMembranePoints};
+	hsize_t start[] = {static_cast<hsize_t>(memIndexOffset)};
+	hsize_t count[] = {static_cast<hsize_t>(numMembranePoints)};
 	herr_t err = H5Sselect_hyperslab(fileSpace, H5S_SELECT_SET, start, NULL, count, NULL);
 	if (err < 0)
 	{
@@ -3050,7 +3050,7 @@ void ChomboScheduler::writeMeshHdf5(MembraneElementMetrics* metricsData, int ver
 	hid_t vertexType = Vertex::createH5Type();
 	int rank = 1;
 	// memory space
-	hsize_t dim[] = {vertexCount};
+	hsize_t dim[] = {static_cast<hsize_t>(vertexCount)};
 	hid_t memSpace = H5Screate_simple(rank, dim, NULL);
 #ifdef CH_MPI
 	// exchange vertex offset and total
@@ -3101,8 +3101,8 @@ void ChomboScheduler::writeMeshHdf5(MembraneElementMetrics* metricsData, int ver
 	dim[0] = totalNumVertices;
 	hid_t fileSpace = H5Screate_simple(rank, dim, NULL);
 	// select offset in file space
-	hsize_t start[] = {vertexIndexOffset};
-	hsize_t count[] = {vertexCount};
+	hsize_t start[] = {static_cast<hsize_t>(vertexIndexOffset)};
+	hsize_t count[] = {static_cast<hsize_t>(vertexCount)};
 	herr_t err = H5Sselect_hyperslab(fileSpace, H5S_SELECT_SET, start, NULL, count, NULL);
 	if (err < 0)
 	{
@@ -3131,7 +3131,7 @@ void ChomboScheduler::writeMeshHdf5(MembraneElementMetrics* metricsData, int ver
 	hid_t segmentType = Segment::createH5Type();
 	int rank = 1;
 	// memory dataspace dimensions
-	hsize_t dim[] = {numMembranePoints};
+	hsize_t dim[] = {static_cast<hsize_t>(numMembranePoints)};
 	hid_t memSpace = H5Screate_simple(rank, dim, NULL);
 
 #ifdef CH_MPI
@@ -3145,8 +3145,8 @@ void ChomboScheduler::writeMeshHdf5(MembraneElementMetrics* metricsData, int ver
 	dim[0] = totalNumMembranePoints;
 	hid_t fileSpace = H5Screate_simple(rank, dim, NULL);
 	// select offset in file space
-	hsize_t start[] = {memIndexOffset};
-	hsize_t count[] = {numMembranePoints};
+	hsize_t start[] = {static_cast<hsize_t>(memIndexOffset)};
+	hsize_t count[] = {static_cast<hsize_t>(numMembranePoints)};
 	herr_t err = H5Sselect_hyperslab(fileSpace, H5S_SELECT_SET, start, NULL, count, NULL);
 	if (err < 0)
 	{
@@ -3175,7 +3175,7 @@ void ChomboScheduler::writeMeshHdf5(MembraneElementMetrics* metricsData, int ver
 	// vertices
 	pout() << "writing dataset " << SURFACE_DATASET << endl;
 	hid_t triangleType = Triangle::createH5Type();
-	hsize_t dim[] = {triangleCount};   /* Dataspace dimensions */
+	hsize_t dim[] = {static_cast<hsize_t>(triangleCount)};   /* Dataspace dimensions */
 	int rank = 1;
 	hid_t memSpace = H5Screate_simple(rank, dim, NULL);
 #ifdef CH_MPI
@@ -3228,8 +3228,8 @@ void ChomboScheduler::writeMeshHdf5(MembraneElementMetrics* metricsData, int ver
 	dim[0] = totalNumTriangles;
 	hid_t fileSpace = H5Screate_simple(rank, dim, NULL);
 	// select offset in file space
-	hsize_t start[] = {triangleOffset};
-	hsize_t count[] = {triangleCount};
+	hsize_t start[] = {static_cast<hsize_t>(triangleOffset)};
+	hsize_t count[] = {static_cast<hsize_t>(triangleCount)};
 	herr_t err = H5Sselect_hyperslab(fileSpace, H5S_SELECT_SET, start, NULL, count, NULL);
 	if (err < 0)
 	{
@@ -3255,7 +3255,7 @@ void ChomboScheduler::writeMeshHdf5(MembraneElementMetrics* metricsData, int ver
 	{
 	pout() << "writing dataset " << SLICE_VIEW_DATASET << endl;
 	hid_t sliceViewType = SliceView::createH5Type();
-	hsize_t dim[] = {numMembranePoints};   /* Dataspace dimensions */
+	hsize_t dim[] = {static_cast<hsize_t>(numMembranePoints)};   /* Dataspace dimensions */
 	int rank = 1;
 	hid_t memSpace = H5Screate_simple(rank, dim, NULL);
 	
@@ -3264,8 +3264,8 @@ void ChomboScheduler::writeMeshHdf5(MembraneElementMetrics* metricsData, int ver
 	dim[0] = totalNumMembranePoints;
 	hid_t fileSpace = H5Screate_simple(rank, dim, NULL);
 	// select offset in file space
-	hsize_t start[] = {memIndexOffset};
-	hsize_t count[] = {numMembranePoints};
+	hsize_t start[] = {static_cast<hsize_t>(memIndexOffset)};
+	hsize_t count[] = {static_cast<hsize_t>(numMembranePoints)};
 	herr_t err = H5Sselect_hyperslab(fileSpace, H5S_SELECT_SET, start, NULL, count, NULL);
 	if (err < 0)
 	{

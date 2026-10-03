@@ -50,8 +50,17 @@ ifneq ($(filter $(cxxname),clang clang++),)
                    -Wno-invalid-offsetof -Wno-variadic-macros
 
   defcxxcomflags := $(_cxxbaseflags)
-  defcxxoptflags := -O2 -funroll-loops
   defcxxdbgflags := -g -Wall
+
+  # clang-cl ignores -funroll-loops with a warning rather than rejecting it, so
+  # it has to go through the /clang: passthrough there to have any effect. -O2
+  # it does understand. $(CXX) is tested directly because $(cxxname) reduces
+  # clang-cl to plain `clang' -- Make.defs splits on '-'.
+  ifneq ($(findstring clang-cl,$(CXX)),)
+    defcxxoptflags := -O2 /clang:-funroll-loops
+  else
+    defcxxoptflags := -O2 -funroll-loops
+  endif
 
   ifeq ($(USE_64),TRUE)
     defcxxcomflags += -m64
@@ -69,6 +78,44 @@ ifneq ($(filter $(cxxname),clang clang++),)
   # failing step never invoked. -x c says "preprocess this as text", which is
   # the only thing this pass has ever meant.
   CH_CPP += -C -x c
+
+endif
+
+################################################################
+##
+## Windows, which in Chombo's terms is $(system) CYGWIN -- see the patsubst in
+## Make.defs that folds MSYS and MINGW onto it.
+##
+## Both of these are about the MSVC runtime rather than about clang, but clang
+## is the only compiler this repo uses on Windows, so this is where they live.
+##
+################################################################
+
+ifeq ($(system),CYGWIN)
+
+  # Twenty-five files under lib/src include <unistd.h>, which the MSVC runtime
+  # does not have, and only getpid() is actually used from it. One
+  # compatibility header on the include path is a far smaller change than
+  # guarding twenty-five vendored sources; see mk/compat/windows/unistd.h.
+  #
+  # Scoped to this branch on purpose -- a header named unistd.h on the include
+  # path unconditionally would shadow the real one on Linux and macOS.
+  defcppcomflags += -I$(CHOMBO_HOME)/mk/compat/windows
+
+  # MSVC's <cmath> defines M_PI only when _USE_MATH_DEFINES is set. Workshop's
+  # HelixIF, HelicoilIF and GaussianSphereIF use it.
+  defcppcomflags += -D_USE_MATH_DEFINES
+
+  # BaseTools/IndexTMI.H uses std::ptr_fun and std::bind2nd, which C++17
+  # removed. libstdc++ keeps them available anyway, which is why no other
+  # platform notices; MSVC's STL honours the removal and gates them behind this
+  # macro, which is its documented switch for exactly this situation.
+  #
+  # A reprieve rather than a fix. The real answer is that ptr_fun around a
+  # function pointer is a no-op and bind2nd is a lambda, both of which would be
+  # provably equivalent -- but that edits vendored Chombo on every platform to
+  # no Windows benefit, and libstdc++ will force the question eventually anyway.
+  defcppcomflags += -D_HAS_AUTO_PTR_ETC=1
 
 endif
 
@@ -95,18 +142,18 @@ ifeq ($(fname),flang)
   # set explicitly so the intent survives either change.
   deffcomflags = -ffp-contract=off
 
-  # ChomboFortran's fort72 pass starts statements in column 4, inside fixed
-  # form's 1-5 label field. gfortran accepts that silently; flang reports
-  # "Character in fixed-form label field must be a digit" on every single file,
-  # which buries everything else.
+  # No -Wno-scanning here, and the history is worth keeping. ChomboFortran
+  # emitted its `subroutine' line with a single leading space, putting the first
+  # character in fixed form's 1-5 label field. gfortran accepts that silently
+  # and flang 21 only warned, so this suppressed the warning on the grounds that
+  # flang's recovery was exactly right -- which a bit-identical parity run had
+  # established.
   #
-  # Suppressed rather than corrected, on purpose. flang's recovery is exactly
-  # right -- a parity run swapping only the Fortran compiler reproduced the
-  # stored regression baselines bit for bit, so nothing is being hidden. Fixing
-  # fort72 to pad to column 7 would be the tidier answer, but it would change
-  # the generated Fortran on every platform to silence a warning on one, and
-  # that is a poor trade against the bit-identity just established.
-  deffcomflags += -Wno-scanning
+  # flang 22 makes it a hard error with no warning group to suppress, and
+  # Windows flang starts at 22, so there was no version that both runs on
+  # Windows and tolerates it. fort72 pads the line now instead; see the comment
+  # there. Nothing to suppress, and leaving a suppression behind would hide the
+  # next occurrence.
 
   ifeq ($(USE_64),TRUE)
     deffcomflags += -m64

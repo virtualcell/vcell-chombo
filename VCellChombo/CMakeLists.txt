@@ -115,11 +115,38 @@ function(add_vcell_chombo_solver DIM)
 			CH_USE_SETVAL
 			H5_USE_16_API)
 
+	# CH_USE_MEMORY_TRACKING has to follow Chombo, and Chombo varies it by
+	# platform: lib/mk/Make.defs.defaults sets USE_MT?=TRUE, and the Darwin block
+	# in lib/mk/Make.defs overrides it to FALSE. So the libraries are built with
+	# tracking everywhere except macOS, and these definitions have to say the
+	# same -- the macro adds `long bytes`, `long peak` and `char name_[120]` to
+	# class Arena, taking it from 8 bytes to 144, and BaseFab<T>::define is a
+	# header template so `new BArena(...)` is sized in whichever translation
+	# unit instantiates it.
+	#
+	# Windows was the one that did not match. $(system) resolves to CYGWIN there,
+	# which gets no override, so Chombo had tracking and the solver did not --
+	# an 8-byte allocation whose constructor wrote 144 bytes. AddressSanitizer:
+	#
+	#   WRITE of size 4 at 0 bytes after 8-byte region
+	#   #0 BArena::BArena(char const *)
+	#   #1 BaseFab<int *>::define BaseFabImplem.H:542
+	#
+	# Defining it unconditionally instead was tried and is wrong: on macOS the
+	# solver then references vectorList_ and arenaList_, which Chombo's Darwin
+	# build does not define, and the link fails with undefined symbols.
 	if (LINUX)
 		target_compile_definitions(${exe} PRIVATE CH_Linux CH_USE_MEMORY_TRACKING)
 	elseif (APPLE)
-		# Chombo's memory tracking uses mallinfo(), which macOS does not have.
+		# No CH_USE_MEMORY_TRACKING: the Darwin block in Chombo's Make.defs turns
+		# USE_MT off, so the libraries here have no tracking to match.
 		target_compile_definitions(${exe} PRIVATE CH_Darwin)
+	elseif (WIN32)
+		# Chombo's own build defines this -- $(system) resolves to CYGWIN on
+		# Windows, and Make.rules turns that into -DCH_CYGWIN -- so the solver's
+		# translation units have to agree. SimTool.cpp keys DIRECTORY_SEPARATOR off
+		# it, and without it a Windows build would quietly use '/'.
+		target_compile_definitions(${exe} PRIVATE CH_CYGWIN CH_USE_MEMORY_TRACKING)
 	endif ()
 
 	if (OPTION_TARGET_PARALLEL)
