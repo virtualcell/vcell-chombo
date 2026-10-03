@@ -172,6 +172,16 @@ jobs:
         run: |
           conan install . --build=missing -pr:a=conan-profiles/CI-CD/Windows-AMD64_profile.txt
 
+      - name: What Conan actually installed
+        shell: pwsh
+        run: |
+          # Ground truth for the library names Chombo's lib/mk/check has to
+          # recognise. Cheap, and it turns a guess-and-push cycle into reading.
+          Get-ChildItem -Path "$env:USERPROFILE\.conan2\p\b" -Filter "*.lib" -Recurse `
+            -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match 'hdf5|zlib|^z\.' } |
+            Select-Object -First 20 FullName | Format-Table -AutoSize -Wrap
+
       - name: Configure
         shell: pwsh
         run: |
