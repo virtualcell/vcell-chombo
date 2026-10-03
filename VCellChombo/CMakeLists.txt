@@ -120,6 +120,12 @@ function(add_vcell_chombo_solver DIM)
 	elseif (APPLE)
 		# Chombo's memory tracking uses mallinfo(), which macOS does not have.
 		target_compile_definitions(${exe} PRIVATE CH_Darwin)
+	elseif (WIN32)
+		# Chombo's own build defines this -- $(system) resolves to CYGWIN on
+		# Windows, and Make.rules turns that into -DCH_CYGWIN -- so the solver's
+		# translation units have to agree. SimTool.cpp keys DIRECTORY_SEPARATOR off
+		# it, and without it a Windows build would quietly use '/'.
+		target_compile_definitions(${exe} PRIVATE CH_CYGWIN)
 	endif ()
 
 	if (OPTION_TARGET_PARALLEL)

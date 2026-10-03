@@ -74,6 +74,33 @@ endif
 
 ################################################################
 ##
+## Windows, which in Chombo's terms is $(system) CYGWIN -- see the patsubst in
+## Make.defs that folds MSYS and MINGW onto it.
+##
+## Both of these are about the MSVC runtime rather than about clang, but clang
+## is the only compiler this repo uses on Windows, so this is where they live.
+##
+################################################################
+
+ifeq ($(system),CYGWIN)
+
+  # Twenty-five files under lib/src include <unistd.h>, which the MSVC runtime
+  # does not have, and only getpid() is actually used from it. One
+  # compatibility header on the include path is a far smaller change than
+  # guarding twenty-five vendored sources; see mk/compat/windows/unistd.h.
+  #
+  # Scoped to this branch on purpose -- a header named unistd.h on the include
+  # path unconditionally would shadow the real one on Linux and macOS.
+  defcppcomflags += -I$(CHOMBO_HOME)/mk/compat/windows
+
+  # MSVC's <cmath> defines M_PI only when _USE_MATH_DEFINES is set. Workshop's
+  # HelixIF, HelicoilIF and GaussianSphereIF use it.
+  defcppcomflags += -D_USE_MATH_DEFINES
+
+endif
+
+################################################################
+##
 ## Fortran: flang
 ##
 ################################################################
