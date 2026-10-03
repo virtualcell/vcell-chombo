@@ -112,9 +112,20 @@ jobs:
           if (-not $dir) { throw "no LLVM clang_rt lib directory under C:\Program Files\LLVM\lib\clang" }
           Write-Host "  runtime directory: $($dir.FullName)"
 
-          # The static-CRT pair. The dynamic and *_thunk variants are for /MD
-          # and for DLLs respectively; this build is /MT and a single exe.
-          $want = @("clang_rt.asan-x86_64.lib", "clang_rt.asan_cxx-x86_64.lib")
+          # LLVM 22 ships no static ASan runtime on Windows at all. The
+          # directory holds only:
+          #
+          #   clang_rt.asan_dynamic-x86_64.{lib,dll}
+          #   clang_rt.asan_static_runtime_thunk-x86_64.lib
+          #   clang_rt.asan_dynamic_runtime_thunk-x86_64.lib
+          #
+          # ASan on Windows is a DLL runtime, and which thunk you link depends
+          # on your CRT rather than on the sanitizer: static_runtime_thunk for
+          # /MT, dynamic_runtime_thunk for /MD. This build is /MT, so it takes
+          # the import library and the static thunk, and the DLL has to be
+          # findable at run time -- see the test step.
+          $want = @("clang_rt.asan_dynamic-x86_64.lib",
+                    "clang_rt.asan_static_runtime_thunk-x86_64.lib")
           $libs = @()
           foreach ($n in $want) {
             $f = Join-Path $dir.FullName $n
@@ -127,6 +138,7 @@ jobs:
           }
           $flags = "/libpath:`"$($dir.FullName)`" " + ($libs -join " ")
           Add-Content -Path $env:GITHUB_ENV -Value "ASAN_LINK_FLAGS=$flags"
+          Add-Content -Path $env:GITHUB_ENV -Value "ASAN_RUNTIME_DIR=$($dir.FullName)"
           Write-Host "  linker flags: $flags"
 
       - name: Configure with AddressSanitizer
@@ -195,6 +207,10 @@ jobs:
           # detect_leaks is off because ASan does not implement leak detection
           # on Windows; asking for it only produces a warning. abort_on_error=0
           # so the report is printed in full before the process goes away.
+          # clang_rt.asan_dynamic-x86_64.dll lives beside the import library,
+          # and nothing else puts that directory on PATH -- without this the
+          # solver fails to start with a missing-DLL error rather than running.
+          $env:PATH = "$env:ASAN_RUNTIME_DIR;$env:PATH"
           $env:ASAN_OPTIONS = "detect_leaks=0:abort_on_error=0:print_summary=1:symbolize=1"
           $env:ASAN_SYMBOLIZER_PATH = "C:\Program Files\LLVM\bin\llvm-symbolizer.exe"
           ctest --test-dir build -R VCellChombo2D_x64_smoke --output-on-failure
