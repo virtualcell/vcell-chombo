@@ -80,6 +80,13 @@ if (WIN32)
 	# before the gitlink here can move. Worth doing eventually; not worth blocking
 	# a Windows build on. See cmake/compat/windows/sys/time.h.
 	include_directories(BEFORE "${CMAKE_SOURCE_DIR}/cmake/compat/windows")
+
+	# The solver's own translation units include Chombo's snapshotted headers, so
+	# they need the same reprieve Chombo's build gets in Make.defs.LLVM:
+	# BaseTools/IndexTMI.H uses std::ptr_fun and std::bind2nd, removed in C++17.
+	# libstdc++ keeps them regardless, MSVC's STL does not, and this is its
+	# documented switch. See the longer note in Make.defs.LLVM.
+	add_compile_definitions(_HAS_AUTO_PTR_ETC=1)
 endif ()
 
 set(CMAKE_CXX_STANDARD 20)

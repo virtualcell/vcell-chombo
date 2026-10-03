@@ -106,6 +106,17 @@ ifeq ($(system),CYGWIN)
   # HelixIF, HelicoilIF and GaussianSphereIF use it.
   defcppcomflags += -D_USE_MATH_DEFINES
 
+  # BaseTools/IndexTMI.H uses std::ptr_fun and std::bind2nd, which C++17
+  # removed. libstdc++ keeps them available anyway, which is why no other
+  # platform notices; MSVC's STL honours the removal and gates them behind this
+  # macro, which is its documented switch for exactly this situation.
+  #
+  # A reprieve rather than a fix. The real answer is that ptr_fun around a
+  # function pointer is a no-op and bind2nd is a lambda, both of which would be
+  # provably equivalent -- but that edits vendored Chombo on every platform to
+  # no Windows benefit, and libstdc++ will force the question eventually anyway.
+  defcppcomflags += -D_HAS_AUTO_PTR_ETC=1
+
 endif
 
 ################################################################
