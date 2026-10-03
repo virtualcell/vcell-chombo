@@ -40,9 +40,32 @@ if (CMAKE_SYSTEM_NAME MATCHES "Linux")
 	set(LINUX TRUE)
 endif ()
 
-if (NOT APPLE AND NOT LINUX)
-	message(FATAL_ERROR "Unsupported operating system: ${CMAKE_SYSTEM_NAME}. "
-			"Chombo's build system needs GNU make and a Unix shell; Windows builds went through Cygwin.")
+if (WIN32)
+	# Windows is supported through clang-cl and flang, which produce native
+	# MSVC-ABI binaries, following vcell-fvsolver. MSVC alone cannot build this:
+	# it has no Fortran compiler, and roughly half of Chombo is Fortran generated
+	# by a perl preprocessor.
+	#
+	# Note that MSYS2 is still required even here, and is not a leftover of the
+	# earlier MinGW attempt: ChomboFortran is perl, and chombo/lib/mk needs GNU
+	# make and a shell with pipefail whoever compiles the code. MSYS2 supplies
+	# those as build tools while nothing it ships compiles anything.
+	if (NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+		message(FATAL_ERROR
+				"On Windows this must be built with clang-cl (CMAKE_CXX_COMPILER_ID is "
+				"${CMAKE_CXX_COMPILER_ID}). MSVC has no Fortran compiler and cannot "
+				"drive ChomboFortran.")
+	endif ()
+	if (NOT CMAKE_Fortran_COMPILER_ID MATCHES "Flang")
+		message(FATAL_ERROR
+				"On Windows the Fortran compiler must be flang (CMAKE_Fortran_COMPILER_ID "
+				"is ${CMAKE_Fortran_COMPILER_ID}). Chombo's Fortran is fixed-form and "
+				"generated; see chombo/lib/mk/compiler/Make.defs.LLVM.")
+	endif ()
+endif ()
+
+if (NOT APPLE AND NOT LINUX AND NOT WIN32)
+	message(FATAL_ERROR "Unsupported operating system: ${CMAKE_SYSTEM_NAME}.")
 endif ()
 
 set(CMAKE_CXX_STANDARD 20)
