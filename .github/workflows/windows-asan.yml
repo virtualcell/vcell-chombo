@@ -106,9 +106,22 @@ jobs:
           #
           # The dependencies and Chombo stay uninstrumented, which is fine --
           # see the note at the top of this file.
+          # CMAKE_TRY_COMPILE_CONFIGURATION is not optional here. CMake's
+          # compiler check does not inherit CMAKE_BUILD_TYPE, so it compiled its
+          # test program with Debug flags -- /Od /RTC1 and, fatally, -MTd -- and
+          # clang-cl refuses:
+          #
+          #   invalid argument '-MTd' not allowed with '-fsanitize=address'
+          #   AddressSanitizer doesn't support linking with debug runtime
+          #   libraries yet
+          #
+          # The real build was always going to be fine: with CMAKE_BUILD_TYPE
+          # Release, Conan's MultiThreaded$<$<CONFIG:Debug>:Debug> resolves to
+          # plain /MT, which ASan does support. Only the try-compile was Debug.
           cmake -B build -S . -G Ninja `
             -DCMAKE_TOOLCHAIN_FILE="$PWD/build/generators/conan_toolchain.cmake" `
             -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TRY_COMPILE_CONFIGURATION=Release `
             -DCMAKE_CXX_FLAGS="-fsanitize=address /Z7" `
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address" `
             -DCMAKE_Fortran_COMPILER="flang" `
