@@ -1,0 +1,162 @@
+name: Windows ASan
+
+# Diagnostic, not a gate. Run on demand to find out where the Windows solver
+# corrupts the heap.
+#
+# The Windows build is complete and the solver runs -- usage and analytic pass
+# in both dimensions -- but smoke and regression die with exit code 0xc0000374,
+# STATUS_HEAP_CORRUPTION. The point of death moves between runs with no
+# relevant change: one run stopped in ChomboScheduler::generateMembraneIndexData
+# and the next got as far as initStencils. That is the signature of heap
+# corruption rather than a deterministic fault -- the damage happens at one
+# point and the allocator notices at the next unlucky allocation.
+#
+# Chasing that through ordinary CI is sampling where the allocator happened to
+# look, not finding the bug. AddressSanitizer reports the offending write and
+# the allocation it belongs to, which is the actual question.
+#
+# Only the C++ compiled by CMake is instrumented -- the solver and the
+# submodules. Chombo's archives are left alone, which keeps this to two flags
+# and no new plumbing: ASan supports partial instrumentation, and its
+# interceptors cover every heap operation in the process regardless of which
+# object file made the call. If the report points into Chombo rather than at
+# our own code, the next step is instrumenting Chombo's make as well.
+#
+# Fortran is not instrumented. flang's ASan support is less travelled, and the
+# allocations here are all made from the C++ side.
+
+# Dispatch only. It shares every expensive step with windows.yml, so running it
+# on push would double the runner time for every commit to answer a question
+# that is only asked occasionally.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: windows-asan-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  asan:
+    name: Windows x86_64 ASan (2D smoke)
+    runs-on: windows-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out repository and submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up the MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install LLVM (clang-cl, clang, flang)
+        shell: pwsh
+        run: |
+          # Pinned to match conan-profiles/CI-CD/Windows-AMD64_profile.txt; see
+          # the note in windows.yml. llvm-symbolizer comes from here too, which
+          # is what turns ASan's addresses into file and line numbers.
+          choco install llvm --version=22.1.8 -y --no-progress --allow-downgrade
+          Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\LLVM\bin"
+
+      - name: Set up MSYS2 for make, perl and a shell with pipefail
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          update: false
+          install: >-
+            make
+            perl
+            diffutils
+
+      - name: Hand CMake the MSYS2 tool paths
+        shell: pwsh
+        run: |
+          $msys = "${{ steps.msys2.outputs.msys2-location }}" -replace '\\','/'
+          foreach ($t in @("make", "perl", "bash")) {
+            Add-Content -Path $env:GITHUB_ENV -Value ("CHOMBO_" + $t.ToUpper() + "=$msys/usr/bin/$t.exe")
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value "MSYS2_USR_BIN=$msys/usr/bin"
+
+      - name: Install Conan
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "conan>=2.0"
+
+      - name: Install dependencies with Conan
+        shell: pwsh
+        run: |
+          conan install . --build=missing -pr:a=conan-profiles/CI-CD/Windows-AMD64_profile.txt
+
+      - name: Configure with AddressSanitizer
+        shell: pwsh
+        run: |
+          . .\build\generators\conanbuild.ps1
+          # -fsanitize=address on both compile and link: the link flag is what
+          # pulls in the ASan runtime. /Z7 puts debug info in the object files,
+          # without which the report is addresses rather than source lines.
+          #
+          # The dependencies and Chombo stay uninstrumented, which is fine --
+          # see the note at the top of this file.
+          cmake -B build -S . -G Ninja `
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/build/generators/conan_toolchain.cmake" `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_CXX_FLAGS="-fsanitize=address /Z7" `
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address" `
+            -DCMAKE_Fortran_COMPILER="flang" `
+            -DCHOMBO_CH_CPP="clang -E -P -C -x c" `
+            -DCHOMBO_MAKE_PROGRAM="$env:CHOMBO_MAKE" `
+            -DCHOMBO_PERL_PROGRAM="$env:CHOMBO_PERL" `
+            -DCHOMBO_BASH_PROGRAM="$env:CHOMBO_BASH" `
+            -DOPTION_TARGET_MESSAGING=OFF `
+            -DOPTION_TARGET_CHOMBO3D_SOLVER=OFF
+
+      - name: Disarm MSYS2's link.exe
+        shell: pwsh
+        run: |
+          # See windows.yml. MSYS2's usr/bin goes on PATH for the build because
+          # Chombo's makefiles want GNU find, chmod, cp, sort and uniq, and its
+          # coreutils link.exe would otherwise shadow MSVC's linker.
+          $l = "$env:MSYS2_USR_BIN/link.exe"
+          if (Test-Path $l) { Move-Item $l "$l.disabled" -Force }
+
+      - name: Build the 2D solver only
+        shell: pwsh
+        run: |
+          # 2D alone: it reproduces the fault and halves the build. Chombo's 3D
+          # libraries are not configured in this job at all.
+          $env:PATH = "$env:MSYS2_USR_BIN;$env:PATH"
+          cmake --build build --target VCellChombo2D_x64
+
+      - name: Run the smoke test under ASan
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          # The job is informational, so a failure here is the point rather than
+          # a problem -- continue-on-error keeps the report readable as a
+          # successful run rather than a red X with the answer buried in it.
+          #
+          # detect_leaks is off because ASan does not implement leak detection
+          # on Windows; asking for it only produces a warning. abort_on_error=0
+          # so the report is printed in full before the process goes away.
+          $env:ASAN_OPTIONS = "detect_leaks=0:abort_on_error=0:print_summary=1:symbolize=1"
+          $env:ASAN_SYMBOLIZER_PATH = "C:\Program Files\LLVM\bin\llvm-symbolizer.exe"
+          ctest --test-dir build -R VCellChombo2D_x64_smoke --output-on-failure
+
+      - name: Report
+        shell: pwsh
+        run: |
+          Write-Host "The ASan output is in the step above. What to look for:"
+          Write-Host "  * the first line names the fault -- heap-buffer-overflow,"
+          Write-Host "    heap-use-after-free, double-free or similar"
+          Write-Host "  * the first stack is the offending access"
+          Write-Host "  * the second names the allocation it belongs to"
+          Write-Host ""
+          Write-Host "If the stacks are addresses rather than source lines, llvm-symbolizer"
+          Write-Host "was not found; if ASan reports nothing at all and the run still dies"
+          Write-Host "with 0xc0000374, the corrupting write is in Chombo rather than in the"
+          Write-Host "instrumented code, and Chombo's make needs -fsanitize=address too."
