@@ -96,13 +96,48 @@ jobs:
         run: |
           conan install . --build=missing -pr:a=conan-profiles/CI-CD/Windows-AMD64_profile.txt
 
+      - name: Locate the ASan runtime libraries
+        shell: pwsh
+        run: |
+          # CMake drives the link with lld-link directly, not through the
+          # clang-cl driver, and -fsanitize=address is a driver flag -- the
+          # driver is what adds the runtime. Passing it to the raw linker gets
+          # "ignoring unknown argument" followed by undefined __asan_init.
+          #
+          # So the libraries are found and passed explicitly. Globbed rather
+          # than hardcoded because the path carries the LLVM major version
+          # (lib/clang/22/lib/windows), which the pin in this file will outlive.
+          $dir = Get-ChildItem "C:\Program Files\LLVM\lib\clang\*\lib\windows" -Directory |
+                 Select-Object -First 1
+          if (-not $dir) { throw "no LLVM clang_rt lib directory under C:\Program Files\LLVM\lib\clang" }
+          Write-Host "  runtime directory: $($dir.FullName)"
+
+          # The static-CRT pair. The dynamic and *_thunk variants are for /MD
+          # and for DLLs respectively; this build is /MT and a single exe.
+          $want = @("clang_rt.asan-x86_64.lib", "clang_rt.asan_cxx-x86_64.lib")
+          $libs = @()
+          foreach ($n in $want) {
+            $f = Join-Path $dir.FullName $n
+            if (Test-Path $f) { $libs += $n; Write-Host "  found $n" }
+            else { Write-Host "::warning::$n not present in $($dir.FullName)" }
+          }
+          if ($libs.Count -eq 0) {
+            Get-ChildItem $dir.FullName -Filter "clang_rt.asan*" | ForEach-Object { Write-Host "    candidate: $($_.Name)" }
+            throw "none of the expected ASan libraries were found; see the candidates above"
+          }
+          $flags = "/libpath:`"$($dir.FullName)`" " + ($libs -join " ")
+          Add-Content -Path $env:GITHUB_ENV -Value "ASAN_LINK_FLAGS=$flags"
+          Write-Host "  linker flags: $flags"
+
       - name: Configure with AddressSanitizer
         shell: pwsh
         run: |
           . .\build\generators\conanbuild.ps1
-          # -fsanitize=address on both compile and link: the link flag is what
-          # pulls in the ASan runtime. /Z7 puts debug info in the object files,
-          # without which the report is addresses rather than source lines.
+          # -fsanitize=address on the compile side instruments the code; the
+          # link side gets the runtime libraries by name, from the step above,
+          # because CMake links with lld-link rather than the clang driver.
+          # /Z7 puts debug info in the object files, without which the report is
+          # addresses rather than source lines.
           #
           # The dependencies and Chombo stay uninstrumented, which is fine --
           # see the note at the top of this file.
@@ -123,7 +158,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_TRY_COMPILE_CONFIGURATION=Release `
             -DCMAKE_CXX_FLAGS="-fsanitize=address /Z7" `
-            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address" `
+            -DCMAKE_EXE_LINKER_FLAGS="$env:ASAN_LINK_FLAGS" `
             -DCMAKE_Fortran_COMPILER="flang" `
             -DCHOMBO_CH_CPP="clang -E -P -C -x c" `
             -DCHOMBO_MAKE_PROGRAM="$env:CHOMBO_MAKE" `
