@@ -87,7 +87,21 @@ jobs:
           # than this baseline. Its prebuilt m4 does not even run here, and a
           # prebuilt static library could carry GLIBC_2.3x symbol references into
           # the solvers. So the whole tree, tools included, is compiled on glibc 2.28.
-          .github/scripts/retry.sh 3 60 conan install . --build="*" \
+          #
+          # gnu-config is the one exception, exempt on the merits rather than
+          # for convenience. Its recipe's build() is literally `pass` and its
+          # package() copies two POSIX shell scripts -- config.guess and
+          # config.sub -- for the autotools dependencies to run at configure
+          # time. Nothing is compiled, so there is no glibc floor to respect:
+          # its package ID is da39a3ee..., the SHA-1 of the empty string, which
+          # is Conan recording that the binary depends on no setting at all.
+          #
+          # Building it means fetching config.git from GNU Savannah, and that
+          # is the only transient network dependency in this job -- it failed
+          # nine times in one day, three consecutively. Taking the prebuilt
+          # package instead removes Savannah from the release path rather than
+          # retrying around it.
+          .github/scripts/retry.sh 3 60 conan install . --build="*" --build="~gnu-config/*" \
             -pr:a=conan-profiles/CI-CD/Linux-AMD64_profile.txt -s:a arch=${{ matrix.conan_arch }}
 
       - name: Configure
@@ -329,11 +343,12 @@ jobs:
 
       - name: Install dependencies with Conan
         shell: pwsh
-        # '-pr:a=...' is quoted because PowerShell otherwise reads it as its
-        # own -name:value syntax and splits it into '-pr' and 'a=...'. Conan
-        # then sees -pr (host profile only) instead of -pr:a (host and build)
-        # and stops on a missing default build profile.
-        run: pwsh .github/scripts/Retry.ps1 3 60 conan install . --build=missing '-pr:a=conan-profiles/CI-CD/Windows-AMD64_profile.txt'
+        # No retry wrapper here, unlike the Linux jobs. The only transient
+        # network dependency they have is gnu-config fetching from GNU
+        # Savannah, and gnu-config is not in the Windows graph at all: the
+        # build requirements here are cmake and ninja, both taken prebuilt
+        # from Conan Center. There is nothing for a retry to cover.
+        run: conan install . --build=missing -pr:a=conan-profiles/CI-CD/Windows-AMD64_profile.txt
 
 
       - name: Configure

@@ -170,10 +170,11 @@ jobs:
       - name: Install dependencies with Conan
         shell: pwsh
         run: |
-          # Quoted: PowerShell reads an unquoted -pr:a=... as its own
-          # -name:value syntax and splits it into '-pr' and 'a=...', so conan
-          # gets -pr instead of -pr:a and stops on a missing build profile.
-          pwsh .github/scripts/Retry.ps1 3 60 conan install . --build=missing '-pr:a=conan-profiles/CI-CD/Windows-AMD64_profile.txt'
+          # Called directly, with no retry wrapper: gnu-config, the one
+          # transient network dependency the Linux jobs retry for, is not in
+          # the Windows graph -- cmake and ninja are the whole of the build
+          # requirements and both come prebuilt from Conan Center.
+          conan install . --build=missing -pr:a=conan-profiles/CI-CD/Windows-AMD64_profile.txt
 
       - name: What Conan actually installed
         shell: pwsh
