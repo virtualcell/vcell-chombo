@@ -24,7 +24,7 @@ the solver had stopped being built (see [Provenance](#provenance)).
 ## Releases
 
 Tagged releases (`vX.Y.Z` on `main`) publish portable archives for Linux x86_64,
-Linux aarch64 and universal macOS, a multi-arch image
+Linux aarch64, universal macOS and Windows x86_64, a multi-arch image
 `ghcr.io/virtualcell/vcell-chombo:<X.Y.Z>`, and an Apptainer SIF
 `ghcr.io/virtualcell/vcell-chombo_singularity:<X.Y.Z>`. They follow VCell's
 solver release contract. See [SOLVER-RELEASE.md](SOLVER-RELEASE.md) for what
@@ -37,10 +37,19 @@ libcurl, plus `cmake`/`ninja` as `tool_requires`.
 
 ### Prerequisites
 
-- **GCC with gfortran.** Chombo is roughly half Fortran, and gfortran's runtime
-  is built against libstdc++, so the whole link has to be a libstdc++ world.
-  That is why `conan-profiles/CI-CD/Linux-AMD64_profile.txt` pins GCC rather
-  than the Clang/libc++/mold toolchain the other VCell solver repos use.
+- **GCC with gfortran**, on Linux and macOS. Chombo is roughly half Fortran,
+  and gfortran's runtime is built against libstdc++, so the whole link has to
+  be a libstdc++ world. That is why
+  `conan-profiles/CI-CD/Linux-AMD64_profile.txt` pins GCC rather than the
+  Clang/libc++/mold toolchain the other VCell solver repos use.
+
+  **Windows is clang-cl and flang instead**, which produce native MSVC-ABI
+  binaries. MSVC alone cannot build this — it has no Fortran compiler — and
+  MinGW is ruled out by CPython's ABI for the eventual Python wheel. MSYS2
+  still supplies the GNU make, perl and shell that ChomboFortran needs, as a
+  build tool rather than a toolchain. See
+  `conan-profiles/CI-CD/Windows-AMD64_profile.txt` and
+  `.github/workflows/windows.yml`.
 - **GNU make and perl**, for the vendored Chombo build (see
   [How Chombo gets built](#how-chombo-gets-built)).
 - The two submodules. A plain `git clone` leaves them empty and CMake stops at

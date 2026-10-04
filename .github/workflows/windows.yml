@@ -1,0 +1,269 @@
+name: Windows CI
+
+# Work in progress, in its own file and on its own branch until green, then it
+# folds into ci.yml as a fourth job.
+#
+# Separate for a practical reason too: GitHub serves a run's logs only once
+# every job in it has finished, so pairing an experimental platform with healthy
+# ones means waiting on the healthy ones just to read the failure.
+#
+# Built with clang-cl and flang, following vcell-fvsolver. MSVC cannot do this
+# alone -- no Fortran compiler -- and MinGW was tried first and rejected for the
+# eventual pybind11 wheel, since CPython's Windows builds are MSVC/UCRT. See
+# conan-profiles/CI-CD/Windows-AMD64_profile.txt.
+#
+# MSYS2 is here as a build tool, not a toolchain: ChomboFortran is perl, and
+# chombo/lib/mk needs GNU make and a shell with pipefail whoever compiles. The
+# three programs it supplies are handed to CMake by absolute path through
+# BuildChomboLibs.cmake's own cache variables, rather than by putting
+# msys64/usr/bin on PATH. That is deliberate -- MSYS2's /usr/bin shadows
+# find.exe, sort.exe and others that the runner and MSBuild rely on, and the
+# resulting breakage is far from the cause.
+
+on:
+  push:
+    branches: [ windows/clang-cl-build ]
+  workflow_dispatch:
+
+concurrency:
+  group: windows-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows x86_64 (clang-cl + flang)
+    runs-on: windows-latest
+    # Conan Center has no binaries for a Windows + clang profile, so the whole
+    # dependency tree compiles here, as it does on macOS.
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out repository and submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up the MSVC environment
+        # clang-cl compiles against the MSVC headers and links with its
+        # libraries, so INCLUDE, LIB and the linker have to be on the
+        # environment before anything is configured.
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install LLVM (clang-cl, clang, flang)
+        shell: pwsh
+        run: |
+          # Pinned rather than `choco upgrade llvm`, which takes whatever is
+          # latest. Unpinned is how vcell-fvsolver does it, and the consequence
+          # is worth knowing: its profile says compiler.version=21 while choco
+          # now installs 22, and Conan never checks a compiler.version setting
+          # against the compiler it actually runs -- it only hashes it into
+          # package IDs. So that mismatch builds green while labelling the
+          # binaries for a compiler that did not build them. The explicit check
+          # below is what makes this repo notice.
+          #
+          # 22.1.8 and not 21.1.8, which was tried first for a good reason and
+          # does not work: flang is absent from LLVM 21's official Windows
+          # installer. 21.1.8 installs cleanly and has no flang.exe at all
+          # (LLVM-21.1.8-win64.exe is 357 MB against 22.1.8's 434 MB, which is
+          # about the difference a Fortran compiler makes). Windows flang starts
+          # at 22, so the version is forced rather than chosen.
+          #
+          # That moved the Fortran compiler out from under the parity evidence,
+          # which was measured on flang 21. Per the rule in the error message
+          # below, flang-parity.yml moved to 22 in the same commit rather than
+          # leaving the claim describing a compiler nothing uses.
+          #
+          # --allow-downgrade because the runner image ships a newer LLVM
+          # already; without it choco declines to go backwards.
+          choco install llvm --version=22.1.8 -y --no-progress --allow-downgrade
+          $llvm = "C:\Program Files\LLVM\bin"
+          if (-not (Test-Path "$llvm\flang.exe")) { throw "flang.exe not in $llvm" }
+          Add-Content -Path $env:GITHUB_PATH -Value $llvm
+          & "$llvm\clang-cl.exe" --version
+          & "$llvm\flang.exe" --version
+
+      - name: Set up MSYS2 for make, perl and a shell with pipefail
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          # The MSYS environment rather than MINGW64: nothing here compiles, so
+          # a MinGW toolchain would only be a larger install and a second set of
+          # compilers on disk to confuse things. It also suppresses the
+          # MINGW64-is-deprecated warning the earlier attempt collected.
+          msystem: MSYS
+          update: false
+          install: >-
+            make
+            perl
+            diffutils
+
+      - name: Hand CMake the MSYS2 tool paths
+        shell: pwsh
+        run: |
+          # Absolute paths, rather than PATH. See the note at the top of this file.
+          $msys = "${{ steps.msys2.outputs.msys2-location }}" -replace '\\','/'
+          foreach ($t in @("make", "perl", "bash")) {
+            $p = "$msys/usr/bin/$t.exe"
+            if (-not (Test-Path $p)) { throw "$t not found at $p" }
+            Add-Content -Path $env:GITHUB_ENV -Value ("CHOMBO_" + $t.ToUpper() + "=" + $p)
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value "MSYS2_USR_BIN=$msys/usr/bin"
+
+      - name: Verify the toolchain the profile expects
+        shell: pwsh
+        run: |
+          $expected = (Select-String -Path conan-profiles/CI-CD/Windows-AMD64_profile.txt `
+                        -Pattern '^compiler\.version=(\d+)').Matches[0].Groups[1].Value
+          $actual = (& clang-cl --version | Select-String -Pattern 'version (\d+)').Matches[0].Groups[1].Value
+          Write-Host "  clang-cl: $actual  (profile expects $expected)"
+          if ($actual -ne $expected) {
+            Write-Host "::error::clang-cl is version $actual but Windows-AMD64_profile.txt pins compiler.version=$expected. The LLVM version is pinned in the install step above; change both together, and re-run the flang parity workflow if the Fortran compiler moved."
+            exit 1
+          }
+          # compiler.runtime_version maps to a Visual Studio installation, and a
+          # mismatch surfaces inside a dependency's generate() as "VS
+          # non-existing installation", naming neither this file nor the
+          # profile. v144 is VS 17, v145 is VS 18.
+          # A table rather than arithmetic, because the mapping is not regular:
+          # v143 and v144 are both Visual Studio 17 (2022), v145 is 18.
+          $toolsetToVs = @{ 'v142' = 16; 'v143' = 17; 'v144' = 17; 'v145' = 18 }
+          $rt = (Select-String -Path conan-profiles/CI-CD/Windows-AMD64_profile.txt `
+                  -Pattern '^compiler\.runtime_version=(v\d+)').Matches[0].Groups[1].Value
+          $haveVs = [int]($env:VisualStudioVersion -split '\.')[0]
+          if (-not $toolsetToVs.ContainsKey($rt)) {
+            Write-Host "::warning::runtime_version $rt is not in this check's table; add it. Visual Studio here is $haveVs."
+          } elseif ($toolsetToVs[$rt] -ne $haveVs) {
+            Write-Host "::error::the runner has Visual Studio $haveVs but Windows-AMD64_profile.txt sets compiler.runtime_version=$rt, which Conan resolves to Visual Studio $($toolsetToVs[$rt]). Update that line."
+            exit 1
+          } else {
+            Write-Host "  Visual Studio $haveVs matches runtime_version=$rt"
+          }
+
+          # Chombo needs GNU make 4+, and BuildChomboLibs.cmake refuses older.
+          & $env:CHOMBO_MAKE --version | Select-Object -First 1
+          & $env:CHOMBO_PERL --version | Select-String 'This is perl'
+
+      - name: Does Chombo recognise this system?
+        shell: pwsh
+        run: |
+          # An unrecognised uname is not diagnosed by Chombo: it falls through to
+          # an "Older Crays" branch that sets CXX=CC and ranlib=touch and then
+          # fails somewhere unrelated. The MSYS shell reports MSYS_NT-..., which
+          # chombo/lib/mk/Make.defs now folds onto CYGWIN -- and that is also
+          # what yields -DCH_CYGWIN, which SimTool keys its path separator off.
+          $sys = & $env:CHOMBO_BASH -lc 'uname'
+          Write-Host "  uname reports: $sys"
+          if ($sys -notmatch '^(MSYS|MINGW|CYGWIN)') {
+            Write-Host "::error::uname reports '$sys', which Make.defs does not map to CYGWIN"
+            exit 1
+          }
+
+      - name: Install Conan
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "conan>=2.0"
+          conan --version
+
+      - name: Install dependencies with Conan
+        shell: pwsh
+        run: |
+          # Called directly, with no retry wrapper: gnu-config, the one
+          # transient network dependency the Linux jobs retry for, is not in
+          # the Windows graph -- cmake and ninja are the whole of the build
+          # requirements and both come prebuilt from Conan Center.
+          conan install . --build=missing -pr:a=conan-profiles/CI-CD/Windows-AMD64_profile.txt
+
+      - name: What Conan actually installed
+        shell: pwsh
+        run: |
+          # Ground truth for the library names Chombo's lib/mk/check has to
+          # recognise. Cheap, and it turns a guess-and-push cycle into reading.
+          Get-ChildItem -Path "$env:USERPROFILE\.conan2\p\b" -Filter "*.lib" -Recurse `
+            -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match 'hdf5|zlib|^z\.' } |
+            Select-Object -First 20 FullName | Format-Table -AutoSize -Wrap
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          . .\build\generators\conanbuild.ps1
+          # CHOMBO_CH_CPP uses the plain clang driver rather than clang-cl, and
+          # that distinction matters. This pass preprocesses ChomboFortran's
+          # output as C text, with GNU-style flags; clang-cl is MSVC-flag-
+          # compatible and does not take -E -P -C -x c in that form. -x c is
+          # what stops clang treating AMRTools/CFLeastSquares.F as Fortran and
+          # handing it to a Fortran compiler -- see BuildChomboLibs.cmake.
+          #
+          # Conan has no Fortran setting, so flang is named here rather than
+          # coming from the profile's [buildenv].
+          cmake -B build -S . -G Ninja `
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/build/generators/conan_toolchain.cmake" `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_Fortran_COMPILER="flang" `
+            -DCHOMBO_CH_CPP="clang -E -P -C -x c" `
+            -DCHOMBO_MAKE_PROGRAM="$env:CHOMBO_MAKE" `
+            -DCHOMBO_PERL_PROGRAM="$env:CHOMBO_PERL" `
+            -DCHOMBO_BASH_PROGRAM="$env:CHOMBO_BASH" `
+            -DOPTION_TARGET_MESSAGING=OFF
+
+      - name: Confirm the toolchain CMake actually picked
+        shell: pwsh
+        run: |
+          # Same guard as the flang parity job, for the same reason: a silent
+          # fallback to another compiler would produce a green run proving
+          # nothing.
+          Select-String -Path build/CMakeCache.txt -Pattern '^CMAKE_(CXX|Fortran)_COMPILER:'
+          $cache = Get-Content build/CMakeCache.txt -Raw
+          if ($cache -notmatch 'CMAKE_Fortran_COMPILER:[A-Z]*=.*flang') {
+            Write-Host "::error::Fortran compiler is not flang"; exit 1
+          }
+          if ($cache -notmatch 'CMAKE_CXX_COMPILER:[A-Z]*=.*clang') {
+            Write-Host "::error::C++ compiler is not clang-cl"; exit 1
+          }
+
+      - name: Disarm MSYS2's link.exe
+        shell: pwsh
+        run: |
+          # The build step below puts MSYS2's usr/bin on PATH, because Chombo's
+          # makefiles call find, chmod, cp, sort and uniq bare and expect GNU
+          # semantics -- System32's find.exe is a text search tool and the
+          # include target dies on it.
+          #
+          # That directory also holds a coreutils link.exe, and having it ahead
+          # of MSVC's linker on PATH is the one genuine hazard in doing this.
+          # Renaming it is blunt but completely effective, and nothing in this
+          # build wants GNU link: it makes a hard link, which no part of Chombo
+          # or CMake invokes.
+          $l = "$env:MSYS2_USR_BIN/link.exe"
+          if (Test-Path $l) { Move-Item $l "$l.disabled" -Force; Write-Host "  renamed $l" }
+          else { Write-Host "::warning::no link.exe at $l -- check this is still needed" }
+
+      - name: Build
+        shell: pwsh
+        run: |
+          # MSYS2 ahead of PATH for this step only. Earlier attempts passed the
+          # tools to CMake by absolute path, which works for make, perl and bash
+          # but not for the find/chmod/cp/sort that Chombo's recipes call bare;
+          # and prepending through `cmake -E env` failed because ninja wraps a
+          # long custom command in a .bat and the Windows PATH contains
+          # "Program Files (x86)", whose parentheses cmd.exe mis-parses.
+          $env:PATH = "$env:MSYS2_USR_BIN;$env:PATH"
+          cmake --build build
+
+      - name: Test
+        shell: pwsh
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Upload solver binaries
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcell-chombo-windows-x86_64
+          path: |
+            build/bin/VCellChombo2D_x64.exe
+            build/bin/VCellChombo3D_x64.exe
+          if-no-files-found: error
+          retention-days: 14

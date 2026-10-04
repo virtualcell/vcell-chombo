@@ -120,14 +120,24 @@ case $action in
           ;;
         -l*)
           lib=lib`echo $f | sed 's/^-l//'`
+          ## On Windows the library is a .lib, and which .lib depends on who
+          ## built it: HDF5's own CMake names its static library libhdf5.lib,
+          ## keeping the prefix, while the plain MSVC convention drops it and
+          ## gives hdf5.lib. Both spellings are accepted rather than guessing,
+          ## because this check rejecting a perfectly good HDF5 stops the build
+          ## before it compiles anything.  <vcell>
+          msvclib=`echo $f | sed 's/^-l//'`.lib
           for d in $dir ; do
-            if [ -e $d/$lib.a -o -e $d/$lib.so ] ; then
+            if [ -e $d/$lib.a -o -e $d/$lib.so -o -e $d/$lib.lib -o -e $d/$msvclib ] ; then
               ok=1
             fi
           done
           if [ $ok -eq 0 ] ; then
             echo
-            echo "error: cannot find the HDF library [$lib.{a,so}] using the HDFLIBFLAGS make variable [$*]"
+            echo "error: cannot find the HDF library [$lib.{a,so,lib} or $msvclib] using the HDFLIBFLAGS make variable [$*]"
+            for d in $dir ; do
+              if [ -d $d ] ; then echo "info: $d contains:" ; ls $d | sed 's/^/        /' ; fi
+            done
             echo "info: it should be defined in lib/mk/Make.defs.local or lib/mk/local/Make.defs.$hostnm"
             errexit
           fi

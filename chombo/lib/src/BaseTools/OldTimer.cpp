@@ -14,6 +14,12 @@
 static char stuff[1024];
 #endif
 
+#ifdef _WIN32
+// For the std::chrono clock in getTimeStampWC below. Here rather than in
+// OldTimer.H, where the equivalent include would land inside that header's
+// extern "C" block.  <vcell>
+#include <chrono>
+#endif
 #include "OldTimer.H"
 
 char dummFlag[4];
@@ -483,6 +489,12 @@ inline double OldTimer::getTimeStampWC()
 {
 #ifdef CH_MPI
   return( MPI_Wtime() );
+#elif defined(_WIN32)
+    // system_clock reads the same wall clock gettimeofday does, to the same
+    // resolution or better, and needs no POSIX header -- struct timeval on
+    // Windows means pulling in winsock2.h.  <vcell>
+    return std::chrono::duration<double>(
+             std::chrono::system_clock::now().time_since_epoch()).count();
 #else
   //gettimeofday(&tv, ( struct timezone * ) NULL);
   gettimeofday(&tv, &tz);

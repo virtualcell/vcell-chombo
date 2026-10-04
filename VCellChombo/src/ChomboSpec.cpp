@@ -16,6 +16,11 @@ ChomboSpec::ChomboSpec()
 	bActivateFeatureUnderDevelopment = false;
 	smallVolfracThreshold = 0;
 	blockFactor = 4;
+	// defaultTagsGrow has existed, declared and defined, without ever being
+	// assigned here. tagsGrow was therefore read uninitialised on every
+	// platform whenever the .fvinput omits TAGS_GROW, which every input in
+	// tests/resources does. See the note in the commit that added this.
+	tagsGrow = defaultTagsGrow;
 
 	chomboGeometry = new ChomboGeometry();
 	

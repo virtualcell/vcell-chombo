@@ -48,6 +48,14 @@ void vcellExit(int returnCode, string& errorMsg)
 		if (returnCode != 0)
 		{
 			SimulationMessaging::getInstVar()->setWorkerEvent(JobEvent::JOB_FAILURE, errorMsg.c_str());
+#ifndef USE_MESSAGING
+			// With messaging compiled out there is no broker for that worker
+			// event to reach, so this branch reported nothing at all and the
+			// process just exited non-zero. Found on the Windows build, where
+			// messaging is always off: a solver failure printed its progress
+			// up to the point of the error and then simply stopped.
+			cerr << errorMsg << endl;
+#endif
 		}
 #ifdef USE_MESSAGING
 		// SimTool is only created once FVSolver has parsed the input file, so it

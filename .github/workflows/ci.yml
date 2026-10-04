@@ -209,7 +209,7 @@ jobs:
           # Messaging is on, matching Linux. Conan Center has no macOS binaries
           # for a GCC profile, so this compiles the whole dependency tree from
           # source -- libcurl and openssl included, which are the longest of them.
-          conan install . --build=missing \
+          .github/scripts/retry.sh 3 60 conan install . --build=missing \
             -pr:a=conan-profiles/CI-CD/${{ matrix.profile }}
 
       - name: Configure

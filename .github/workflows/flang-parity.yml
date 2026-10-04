@@ -48,11 +48,14 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Matched to what `choco upgrade llvm` installs on the Windows runner, which
-  # is what vcell-fvsolver's Windows profile pins (compiler.version=21).
+  # Matched to the LLVM that .github/workflows/windows.yml installs, which is
+  # pinned at 22.1.8 because flang is absent from LLVM 21's Windows installer.
+  # The point of this job is to describe the compiler the Windows binaries are
+  # actually built with, so this tracks that pin and the two move together.
+  #
   # Ubuntu 24.04's own flang package is LLVM 18, several releases of flang
-  # maturity behind, so a result there would not predict the Windows one.
-  LLVM_VERSION: 21
+  # maturity behind, so a result from it would not predict the Windows one.
+  LLVM_VERSION: 22
 
 jobs:
   parity:
@@ -87,11 +90,11 @@ jobs:
           chmod +x /tmp/llvm.sh
           sudo /tmp/llvm.sh "${LLVM_VERSION}" || true
           FOUND=""
-          for v in "${LLVM_VERSION}" 20 19; do
+          for v in "${LLVM_VERSION}" 21 20; do
             if sudo apt-get install -y "clang-$v" "flang-$v"; then FOUND="$v"; break; fi
           done
           if [ -z "$FOUND" ]; then
-            echo "::error::no flang available from apt.llvm.org; tried ${LLVM_VERSION} 20 19"
+            echo "::error::no flang available from apt.llvm.org; tried ${LLVM_VERSION} 21 20"
             exit 1
           fi
           echo "FC_BIN=flang-$FOUND" >> "$GITHUB_ENV"

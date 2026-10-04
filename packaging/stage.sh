@@ -23,7 +23,16 @@ rm -rf "$stage"
 mkdir -p "$stage/THIRD-PARTY-LICENSES"
 
 for exe in VCellChombo2D_x64 VCellChombo3D_x64; do
-	install -m 0755 "$build/bin/$exe" "$stage/$exe"
+	# Windows produces <name>.exe and the archive keeps that name: the layout in
+	# SOLVER-RELEASE.md says the executables go in under the names VCell
+	# resolves, and VCell appends .exe there (docs/plan-solver-repos.md, PR A).
+	src="$build/bin/$exe"
+	dst="$stage/$exe"
+	if [ ! -e "$src" ] && [ -e "$src.exe" ]; then
+		src="$src.exe"
+		dst="$dst.exe"
+	fi
+	install -m 0755 "$src" "$dst"
 done
 
 printf '%s\n' "$version" > "$stage/VERSION"
