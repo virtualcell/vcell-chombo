@@ -87,7 +87,7 @@ jobs:
           # than this baseline. Its prebuilt m4 does not even run here, and a
           # prebuilt static library could carry GLIBC_2.3x symbol references into
           # the solvers. So the whole tree, tools included, is compiled on glibc 2.28.
-          conan install . --build="*" \
+          .github/scripts/retry.sh 3 60 conan install . --build="*" \
             -pr:a=conan-profiles/CI-CD/Linux-AMD64_profile.txt -s:a arch=${{ matrix.conan_arch }}
 
       - name: Configure
@@ -172,7 +172,7 @@ jobs:
           g++-13 --version | head -1
 
       - name: Install dependencies with Conan
-        run: conan install . --build=missing -pr:a=conan-profiles/CI-CD/${{ matrix.profile }}
+        run: .github/scripts/retry.sh 3 60 conan install . --build=missing -pr:a=conan-profiles/CI-CD/${{ matrix.profile }}
 
       - name: Configure
         run: |
@@ -329,7 +329,7 @@ jobs:
 
       - name: Install dependencies with Conan
         shell: pwsh
-        run: conan install . --build=missing -pr:a=conan-profiles/CI-CD/Windows-AMD64_profile.txt
+        run: pwsh .github/scripts/Retry.ps1 3 60 conan install . --build=missing -pr:a=conan-profiles/CI-CD/Windows-AMD64_profile.txt
 
       - name: Configure
         shell: pwsh
